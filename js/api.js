@@ -276,6 +276,7 @@ const Api = (() => {
         items: (byDay[d.id] || []).sort(rekkefolge).map(i => ({
           id: i.id, t: i.t || "", title: i.title, place: i.place_id, note: i.note, src: i.src,
           paamelding: i.paamelding === true, plasser: i.plasser == null ? null : i.plasser,
+          minutter: i.minutter == null ? null : i.minutter,
           paaChat: i.paa_chat || null,
           sort: (i.sort === undefined || i.sort === null) ? null : i.sort
         }))
@@ -1144,12 +1145,18 @@ const Api = (() => {
     if (error) throw error;
   }
 
-  async function addItem(tripId, dayId, { t, title, placeId, note, sort }) {
+  async function addItem(tripId, dayId, { t, title, placeId, note, sort, minutter }) {
     const rad = {
       trip_id: tripId, day_id: dayId, t: t || null, title,
       place_id: placeId || null, note: note || ""
     };
+    if (minutter) rad.minutter = minutter;
     let svar = await sb.from("items").insert({ ...rad, sort: sort || 0 }).select().single();
+    // Mangler varighetskolonnen enda, legges punktet inn uten den.
+    if (svar.error && /minutter/.test(svar.error.message || "")) {
+      delete rad.minutter;
+      svar = await sb.from("items").insert({ ...rad, sort: sort || 0 }).select().single();
+    }
     // Er ikke rekkefolge-kolonnen lagt til enda, legg inn punktet uten den.
     if (svar.error && /sort/.test(svar.error.message || "")) {
       svar = await sb.from("items").insert(rad).select().single();
@@ -1276,6 +1283,7 @@ const Api = (() => {
     if ("placeId" in felter) rad.place_id = felter.placeId || null;
     if ("note" in felter) rad.note = felter.note || "";
     if ("sort" in felter) rad.sort = felter.sort;
+    if ("minutter" in felter) rad.minutter = felter.minutter || null;
     if ("paamelding" in felter) rad.paamelding = !!felter.paamelding;
     if ("plasser" in felter) rad.plasser = felter.plasser === "" || felter.plasser == null ? null : Number(felter.plasser);
     if ("paaChat" in felter) rad.paa_chat = felter.paaChat || null;
@@ -1346,7 +1354,7 @@ const Api = (() => {
         await addItem(tripId, dayId, {
           t: it.t, title: it.title,
           placeId: it.place ? ids[it.place] : null,
-          note: it.note || ""
+          note: it.note || "", minutter: it.minutter || null
         });
       }
     }

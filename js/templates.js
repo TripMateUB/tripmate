@@ -100,22 +100,22 @@ const TEMPLATES = [
       ]},
       { offset:1, hotel:"lafayette", items:[
         { t:"08:15", title:"Avreise fra lobbyen", place:"lafayette" },
-        { t:"10:00", title:"Louvre — kunsthistorie", place:"louvre", note:"Vi går sammen inn, så fri vandring i to timer." },
+        { t:"10:00", title:"Louvre — kunsthistorie", place:"louvre", minutter:180, note:"Vi går sammen inn, så fri vandring i to timer." },
         { t:"13:00", title:"Lunsj i Tuileries", note:"Ta med matpakke fra hotellet" },
-        { t:"15:00", title:"Notre-Dame og Île de la Cité", place:"notre" },
+        { t:"15:00", title:"Notre-Dame og Île de la Cité", place:"notre", minutter:90 },
         { t:"19:00", title:"Middag på hotellet", place:"lafayette" },
         { t:"22:00", title:"Innetid", place:"lafayette" }
       ]},
       { offset:2, hotel:"lafayette", items:[
         { t:"08:30", title:"Tog til Versailles", place:"lafayette" },
-        { t:"10:00", title:"Slottet og hagene", place:"versailles" },
+        { t:"10:00", title:"Slottet og hagene", place:"versailles", minutter:300 },
         { t:"16:00", title:"Tilbake til byen" },
         { t:"18:30", title:"Middag på hotellet", place:"lafayette" }
       ]},
       { offset:3, hotel:"lafayette", items:[
-        { t:"09:30", title:"Gruppedag", note:"Gruppene velger selv, se gruppechat" },
-        { t:"14:00", title:"Eiffeltårnet, oppstigning", place:"eiffel" },
-        { t:"16:30", title:"Felles samling", place:"sacre" },
+        { t:"09:30", title:"Gruppe Eiffeltårnet", place:"eiffel", minutter:240, note:"Se gruppechatten" },
+        { t:"09:30", title:"Gruppe museum", place:"orsay", minutter:240, note:"Se gruppechatten" },
+        { t:"16:30", title:"Felles samling", place:"sacre", minutter:60 },
         { t:"21:00", title:"Innetid", place:"lafayette" }
       ]},
       { offset:4, hotel:"lafayette", items:[

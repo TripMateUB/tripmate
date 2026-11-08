@@ -97,6 +97,7 @@ function lagApi() {
     items: d.items.map(it => ({
       id: "pkt" + (teller++), t: it.t || "", title: it.title,
       place: it.place ? places[it.place].id : null, note: it.note || null, src: null,
+      minutter: it.minutter == null ? null : it.minutter,
       paamelding: false, plasser: null, paaChat: null, sort: null
     }))
   }, fmtDay(dates[i])));

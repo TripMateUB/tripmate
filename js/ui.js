@@ -481,8 +481,8 @@ const UI = (() => {
     if (ne) {
       const p = ne.item.place ? trip.places[ne.item.place] : null;
       kort = `<section class="naakort">
-        <div class="merk"><i></i>${ne.day.date === today() ? "Nå snart" : "Neste · " + esc(ne.day.label)}</div>
-        <div class="kl">${esc(ne.item.t || "—")}</div>
+        <div class="merk"><i></i>${ne.naa ? "Nå" : ne.day.date === today() ? "Nå snart" : "Neste · " + esc(ne.day.label)}</div>
+        <div class="kl">${ne.item.t ? esc(tidTekst(ne.item)) : "—"}</div>
         <div class="hva">${esc(ne.item.title)}${vaerMerke(ne.item.place, ne.day.date, ne.item.t, dagensSted(ne.day))}</div>
         ${p ? `<div class="hvor">${esc(p.name)}${p.addr ? " · " + esc(p.addr) : ""}</div>` : ""}
         <div class="knapper">
@@ -522,10 +522,48 @@ const UI = (() => {
         </div>` : ""}`;
   }
 
+  /* ───────── varighet ─────────
+     Et punkt uten varighet er et tidspunkt. Et punkt med varighet er et
+     tidsrom, og da kan to ting foregå samtidig — programmet er ikke
+     lenger en rekkefølge, og det må leses av skjermen. */
+  const minutt = t => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+
+  function slutt(i) {
+    if (!i.t || !i.minutter) return null;
+    const s = minutt(i.t) + i.minutter;
+    if (s >= 24 * 60) return "23:59";          // går det over midnatt, stopper vi ved døgnet
+    return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
+  }
+
+  const tidTekst = i => { const s = slutt(i); return s ? i.t + "–" + s : i.t; };
+
+  /* Hvilke punkter deler tid med et annet. To uten varighet teller som
+     samtidige bare hvis de starter på samme klokkeslett. */
+  function samtidige(items) {
+    const med = items.filter(i => i.t);
+    const sett = new Set();
+    for (let x = 0; x < med.length; x++) for (let y = x + 1; y < med.length; y++) {
+      const A = med[x], B = med[y];
+      const a0 = minutt(A.t), a1 = a0 + (A.minutter || 0);
+      const b0 = minutt(B.t), b1 = b0 + (B.minutter || 0);
+      if (a0 === b0 || (a0 < b1 && b0 < a1)) { sett.add(A.id); sett.add(B.id); }
+    }
+    return sett;
+  }
+
+  const VARIGHETER = [[0, "Ikke satt"], [15, "15 minutter"], [30, "30 minutter"],
+    [45, "45 minutter"], [60, "1 time"], [90, "1 time 30"], [120, "2 timer"],
+    [180, "3 timer"], [240, "4 timer"], [360, "6 timer"], [480, "8 timer"]];
+  const varighetValg = v => VARIGHETER.map(([m, navn]) =>
+    `<option value="${m}"${(v || 0) === m ? " selected" : ""}>${navn}</option>`).join("");
+
   function nextEvent(trip) {
     const t = new Date().toTimeString().slice(0, 5);
     const d = trip.days.find(x => x.date === today());
     if (d) {
+      // Noe som foregår akkurat nå er viktigere enn noe som kommer.
+      const paagaar = d.items.find(i => { const s = slutt(i); return i.t && i.t <= t && s && s > t; });
+      if (paagaar) return { day: d, item: paagaar, naa: true };
       const item = d.items.find(i => i.t && i.t > t);
       if (item) return { day: d, item };
       const nd = trip.days.find(x => x.date > today());
@@ -639,13 +677,17 @@ const UI = (() => {
 
     const hotel = d.hotel ? trip.places[d.hotel] : null;
     const reserveSted = dagensSted(d);
+    const samtidig = samtidige(d.items);
     const rows = d.items.length ? d.items.map((i, k) => {
       const p = i.place ? trip.places[i.place] : null;
       const isNext = ne && ne.day.date === d.date && ne.item.id === i.id && d.date === today();
+      const sl = slutt(i);
       return `<div class="ev ${isNext ? "now" : ""}" data-item="${esc(i.id)}" role="button" tabindex="0">
-        <div class="time">${i.t ? esc(i.t) : '<span style="color:var(--ink-3)">—</span>'}${isNext ? "<em>neste</em>" : ""}</div>
+        <div class="time">${i.t ? esc(i.t) : '<span style="color:var(--ink-3)">—</span>'}${
+          sl ? `<small>${esc(sl)}</small>` : ""}${isNext ? "<em>neste</em>" : ""}</div>
         <div>
-          <div class="title">${esc(i.title)}${vaerMerke(i.place, d.date, i.t, reserveSted)}</div>
+          <div class="title">${esc(i.title)}${vaerMerke(i.place, d.date, i.t, reserveSted)}${
+            samtidig.has(i.id) ? '<span class="samtidigmerke">samtidig</span>' : ""}</div>
           ${i.paamelding ? (() => {
             const folk = Api.paameldte(i.id);
             const jeg = folk.some(p => p.meg);
@@ -1518,6 +1560,19 @@ const UI = (() => {
       }
     }
 
+    // Dagstripa blas sidelengs når dagen har mange punkter. Da skal nå
+    // være synlig uten at man må dra, ellers ser dagen tom ut.
+    const stripa = $("screen").querySelector(".stripe .punkter");
+    if (stripa) {
+      const naa = stripa.querySelector(".pk.aktiv") || stripa.querySelector(".pk:not(.ferdig)");
+      if (naa) {
+        const v = naa.getBoundingClientRect(), c = stripa.getBoundingClientRect();
+        const marg = 20;
+        if (v.left < c.left + marg) stripa.scrollLeft -= (c.left + marg) - v.left;
+        else if (v.right > c.right - marg) stripa.scrollLeft += v.right - (c.right - marg);
+      }
+    }
+
     // Fanerada er i veien når du skriver i en samtale.
     $("tabbar").hidden = Boolean(conv);
     tegnFaner();
@@ -2069,7 +2124,7 @@ const UI = (() => {
     const leder = S.trip.role === "leader";
 
     openSheet(`
-      <div class="eyebrow">${esc(dag.label)}${it.t ? " · " + esc(it.t) : ""}</div>
+      <div class="eyebrow">${esc(dag.label)}${it.t ? " · " + esc(tidTekst(it)) : ""}</div>
       <h3>${esc(it.title)}</h3>
       ${p ? `<div class="addr">${esc(p.name)}${p.addr ? " · " + esc(p.addr) : " · ingen adresse"}</div>` : ""}
       ${it.note ? `<div class="addr">${esc(it.note)}</div>` : ""}
@@ -2084,6 +2139,8 @@ const UI = (() => {
           <div class="field"><label for="eTid">Klokkeslett</label>
             <input id="eTid" type="time" value="${esc(it.t)}">
             <small style="color:var(--ink-3);display:block;margin-top:5px">La stå tomt hvis tiden ikke er bestemt.</small></div>
+          <div class="field"><label for="eVarer">Varer</label>
+            <select id="eVarer" class="select">${varighetValg(it.minutter)}</select></div>
           <div class="field"><label for="eTittel">Hva skjer</label><input id="eTittel" value="${esc(it.title)}"></div>
           <div class="field"><label for="eSted">Sted</label>
             <select id="eSted" class="select">
@@ -2165,6 +2222,7 @@ const UI = (() => {
         try {
           await Api.updateItem(it.id, {
             t: $("eTid").value,
+            minutter: Number($("eVarer").value) || null,
             title: $("eTittel").value.trim() || it.title,
             placeId,
             note: $("eNotat").value.trim(),
@@ -2422,6 +2480,10 @@ const UI = (() => {
       <p class="muted" style="margin:6px 0 14px">${esc(day ? day.label : "")}</p>
       <form id="addItemForm">
         <div class="field"><label for="iTime">Klokkeslett</label><input id="iTime" type="time" value="09:00"></div>
+        <div class="field"><label for="iVarer">Varer</label>
+          <select id="iVarer" class="select">${varighetValg(0)}</select>
+          <small style="display:block;margin-top:5px;font-size:12.5px;color:var(--ink-3)">
+            Har to punkter varighet som overlapper, viser appen at de skjer samtidig.</small></div>
         <div class="field"><label for="iTitle">Hva skjer</label><input id="iTitle" placeholder="Omvisning Berlinmuren"></div>
         <div class="field">
           <label for="iPlace">Sted</label>
@@ -2467,7 +2529,8 @@ const UI = (() => {
           });
         }
         await Api.addItem(S.trip.id, dayId, {
-          t: $("iTime").value, title, placeId, note: $("iNote").value.trim()
+          t: $("iTime").value, title, placeId, note: $("iNote").value.trim(),
+          minutter: Number($("iVarer").value) || null
         });
         closeSheet();
         await openTrip(S.trip.id);
