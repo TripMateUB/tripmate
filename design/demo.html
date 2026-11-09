@@ -133,6 +133,13 @@ function lagApi() {
         minutter: 120, paamelding: false, plasser: null, paaChat: null, sort: null
       });
       idag.items.length = 0;                 // bare de to, saa sjekken er entydig
+      // ?samtidig=3: ett punkt uten sluttid, startet for tre minutter siden.
+      if (VALG.get("samtidig") === "3") {
+        // &siden=7 lar sjekken se at femminutters-vinduet faktisk lukker seg.
+        const tre = new Date(Date.now() - Number(VALG.get("siden") || 3) * 60000);
+        const klTre = String(tre.getHours()).padStart(2, "0") + ":" + String(tre.getMinutes()).padStart(2, "0");
+        idag.items.push(Object.assign(lag("s0", "Avreise fra skolen", "eiffel"), { t: klTre, minutter: null }));
+      } else {
       idag.items.push(lag("s1", "Gruppe A — Eiffeltaarnet", "eiffel"));
       idag.items.push(lag("s2", "Gruppe B — Orsay", "orsay"));
       // Overlapper de to over, men har ikke begynt enda: skal ikke staa
@@ -140,6 +147,7 @@ function lagApi() {
       const senere = new Date(n.getTime() + 35 * 60000);
       const klSenere = String(senere.getHours()).padStart(2, "0") + ":" + String(senere.getMinutes()).padStart(2, "0");
       idag.items.push(Object.assign(lag("s3", "Gruppe C — har ikke startet", "sacre"), { t: klSenere }));
+      }
       idag.items.sort((a, b) => String(a.t).localeCompare(String(b.t)));
     }
   }
@@ -221,8 +229,17 @@ function lagApi() {
     reactions: () => ({}),
     toggleReaction: lover(undefined),
     lastReaksjoner: lover(undefined),
-    vaerFor: () => null,
-    vaerPunkt: () => null,
+    // Et paafunnet, men fast vaer: samme sted og time gir samme svar,
+    // saa bildene og maalingene ikke endrer seg mellom hver kjoering.
+    vaerFor: id => (stedMap[id] && stedMap[id].lat != null ? { timer: [] } : null),
+    vaerPunkt: (id, dato, tid) => {
+      const p = stedMap[id];
+      if (!p || p.lat == null) return null;
+      const n = (String(id) + dato + (tid || "")).split("")
+        .reduce((a, c) => a + c.charCodeAt(0), 0);
+      const SYM = ["clearsky_day", "partlycloudy_day", "cloudy", "rain", "fair_day"];
+      return { sym: SYM[n % SYM.length], temp: 4 + (n % 14) };
+    },
     lastVaer: () => new Promise(r => setTimeout(() =>
       r(VALG.has("vaerfeil") ? { ok: false, grunn: "Fikk ikke lest stedene." } : { ok: true, uten: 0, bygg: 3 }), 700)),
     lastOppBilde: lover(null),

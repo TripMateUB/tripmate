@@ -286,7 +286,7 @@ for (const [flagg, venta] of [["", /står fortsatt uten posisjon/], ["&vaerfeil=
   await s4.waitForSelector("#tabbar button");
   await s4.waitForTimeout(600);
   await sjekk("kortet staar paa Naa", async () =>
-    /^Nå$/.test((await s4.$eval(".naakort .merk", e => e.textContent)).trim()));
+    /^Nå/.test((await s4.$eval(".naakort .merk", e => e.textContent)).trim()));
   await sjekk("naa-kortet viser det andre punktet som skjer samtidig", async () =>
     (await s4.$$eval(".ogsaarad", e => e.length)) === 1);
   await sjekk("et punkt som overlapper, men ikke har startet, staar ikke under Samtidig", async () =>
@@ -299,6 +299,20 @@ for (const [flagg, venta] of [["", /står fortsatt uten posisjon/], ["&vaerfeil=
   });
   await sjekk("raden er stor nok til aa treffes", async () =>
     (await s4.$eval(".ogsaarad", e => Math.round(e.getBoundingClientRect().height))) >= 44);
+  await sjekk("naa-kortet viser vaer", async () =>
+    (await s4.$$eval(".naakort .hva .vaer", e => e.length)) === 1);
+  await sjekk("den samtidige raden viser vaer", async () =>
+    (await s4.$$eval(".ogsaarad .vaer", e => e.length)) === 1);
+  await sjekk("hvert punkt under Senere i dag viser vaer", async () => {
+    const rader = await s4.$$eval(".post", e => e.length);
+    const vaer = await s4.$$eval(".post .vaer", e => e.length);
+    return rader > 0 && vaer === rader;
+  });
+  await sjekk("vaeret klippes ikke bort i den samtidige raden", async () =>
+    await s4.$eval(".ogsaarad .vaer", e => {
+      const v = e.getBoundingClientRect(), rad = e.closest(".ogsaarad").getBoundingClientRect();
+      return v.width > 0 && v.right <= rad.right + 1 && v.left >= rad.left - 1;
+    }));
   await sjekk("den samtidige raden apner sitt eget punkt", async () => {
     await s4.evaluate(() => document.querySelector(".ogsaarad").click());
     await s4.waitForTimeout(500);
@@ -323,6 +337,27 @@ for (const [flagg, venta] of [["", /står fortsatt uten posisjon/], ["&vaerfeil=
   await sjekk("et punkt som begynner senere vises ikke", async () =>
     !/har ikke startet/.test(await s5.$eval(".naakort", e => e.textContent)));
   await s5.close();
+}
+
+/* Et punkt uten sluttid varer fem minutter. «Avreise 08:00» skal ikke
+   slutte aa vaere naa i samme sekund som klokka slaar. */
+for (const [siden, venta, hva] of [
+  ["3", /^Nå · startet for 3 minutter siden$/, "tre minutter etter start"],
+  ["1", /^Nå · startet for 1 minutt siden$/, "ett minutt etter start"],
+  ["7", /^Neste · /, "sju minutter etter start"]
+]) {
+  const s6 = await (await nb.newContext({ ...devices["iPhone 13"] })).newPage();
+  s6.on("pageerror", e => feil.push("pageerror (uten sluttid): " + e));
+  await s6.goto(`http://localhost:${process.env.PORT || 4321}/design/demo.html?samtidig=3&siden=${siden}`, { waitUntil: "networkidle" });
+  await s6.waitForSelector("#tabbar button");
+  await s6.waitForTimeout(600);
+  await sjekk(`punkt uten sluttid, ${hva}`, async () =>
+    venta.test((await s6.$eval(".naakort .merk", e => e.textContent)).trim()));
+  if (siden !== "7") {
+    await sjekk(`klokkeslettet staar alene, ${hva}`, async () =>
+      /^\d\d:\d\d$/.test((await s6.$eval(".naakort .kl", e => e.textContent)).trim()));
+  }
+  await s6.close();
 }
 console.log("OK:\n  " + ok.join("\n  "));
 console.log(nei.length ? "\nFEIL:\n  " + nei.join("\n  ") : "\nFEIL: ingen");

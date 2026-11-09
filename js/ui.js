@@ -487,7 +487,7 @@ const UI = (() => {
       // den skjermen folk faktisk ser om morgenen.
       const ogsaa = samtidigeMed(ne.day, ne.item, naa, Boolean(ne.naa));
       kort = `<section class="naakort">
-        <div class="merk"><i></i>${ne.naa ? "Nå" : ne.day.date === today() ? "Nå snart" : "Neste · " + esc(ne.day.label)}</div>
+        <div class="merk"><i></i>${ne.naa ? "Nå" + esc(sidenTekst(ne.item, naa)) : ne.day.date === today() ? "Nå snart" : "Neste · " + esc(ne.day.label)}</div>
         <div class="kl">${ne.item.t ? esc(tidTekst(ne.item)) : "—"}</div>
         <div class="hva">${esc(ne.item.title)}${vaerMerke(ne.item.place, ne.day.date, ne.item.t, dagensSted(ne.day))}</div>
         ${p ? `<div class="hvor">${esc(p.name)}${p.addr ? " · " + esc(p.addr) : ""}</div>` : ""}
@@ -499,6 +499,7 @@ const UI = (() => {
               <span class="t">${esc(tidTekst(x))}</span>
               <span class="grow"><span class="h">${esc(x.title)}</span>
                 ${q ? `<span class="s">${esc(q.name)}</span>` : ""}</span>
+              <span class="ogsaavaer">${vaerMerke(x.place, ne.day.date, x.t, dagensSted(ne.day))}</span>
               <span class="pil">${ICON.chev}</span></button>`;
           }).join("")}
         </div>` : ""}
@@ -532,7 +533,7 @@ const UI = (() => {
             const p = i.place ? trip.places[i.place] : null;
             return `<button class="post" data-item="${esc(i.id)}">
               <span class="t">${i.t ? esc(i.t) : "—"}</span>
-              <span><span class="h">${esc(i.title)}</span>
+              <span><span class="h">${esc(i.title)}${vaerMerke(i.place, idag.date, i.t, sted)}</span>
                 ${p ? `<span class="s">${esc(p.name)}</span>` : (i.note ? `<span class="s">${esc(i.note)}</span>` : "")}</span>
               <span class="pil">${ICON.chev}</span></button>`;
           }).join("")}
@@ -590,6 +591,23 @@ const UI = (() => {
 
   const tidTekst = i => { const s = slutt(i); return s ? i.t + "–" + s : i.t; };
 
+  /* «Avreise 08:00» har ingen sluttid, men det skjer jo noe der. Uten en
+     varighet er punktet et punkt uten utstrekning, og 08:00 holdt opp å
+     være «nå» i samme sekund som klokka slo — kortet hoppet videre til
+     neste mens folk fortsatt sto og gikk om bord. Derfor varer et punkt
+     uten sluttid fem minutter. Det er bare for å avgjøre hva som skjer
+     nå; i programmet står det fortsatt som ett klokkeslett. */
+  const UTEN_SLUTT_MIN = 5;
+  const sluttMinutt = i => minutt(i.t) + (i.minutter || UTEN_SLUTT_MIN);
+  const paagaarNaa = (i, naa) => Boolean(i.t) && i.t <= naa && sluttMinutt(i) > minutt(naa);
+
+  /* «startet for 3 minutter siden», så det går an å se om man er sent ute. */
+  function sidenTekst(i, naa) {
+    const d = minutt(naa) - minutt(i.t);
+    if (d <= 0) return "";
+    return ` · startet for ${d} ${d === 1 ? "minutt" : "minutter"} siden`;
+  }
+
   /* De andre punktene som deler tid med dette ene. «samtidige» svarer
      for hele dagen; her trengs naboene til ett punkt. */
   function samtidigeMed(dag, i, naa, paagaar) {
@@ -598,11 +616,7 @@ const UI = (() => {
       // Kortet handler om dette oeyeblikket. Da er «samtidig» det som
       // faktisk kjoerer naa — ikke noe som overlapper, men ikke har
       // begynt. Et punkt uten varighet er et tidspunkt og paagaar aldri.
-      return dag.items.filter(x => {
-        if (x.id === i.id || !x.t || x.t > naa) return false;
-        const s = slutt(x);
-        return Boolean(s) && s > naa;
-      });
+      return dag.items.filter(x => x.id !== i.id && paagaarNaa(x, naa));
     }
     // Ingenting paagaar: da er «samtidig» det som begynner i samme
     // oeyeblikk som det neste — to grupper som gaar hver sin vei 09:30.
@@ -641,7 +655,7 @@ const UI = (() => {
     const d = trip.days.find(x => x.date === today());
     if (d) {
       // Noe som foregår akkurat nå er viktigere enn noe som kommer.
-      const paagaar = d.items.find(i => { const s = slutt(i); return i.t && i.t <= t && s && s > t; });
+      const paagaar = d.items.find(i => paagaarNaa(i, t));
       if (paagaar) return { day: d, item: paagaar, naa: true };
       const item = d.items.find(i => i.t && i.t > t);
       if (item) return { day: d, item };
