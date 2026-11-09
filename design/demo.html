@@ -118,6 +118,24 @@ function lagApi() {
     }))
   }, fmtDay(dates[i])));
 
+  // ?samtidig=1 legger to punkter paa samme klokkeslett litt fram i tid,
+  // saa sjekkene kan se hva naa-kortet gjoer naar to ting skjer paa en gang.
+  if (VALG.has("samtidig")) {
+    const idag = days.find(x => x.date === new Date().toISOString().slice(0, 10));
+    if (idag) {
+      const n = new Date(Date.now() - 5 * 60000);
+      const kl = String(n.getHours()).padStart(2, "0") + ":" + String(n.getMinutes()).padStart(2, "0");
+      const lag = (id, tittel, sted) => ({
+        id, t: kl, title: tittel, place: sted ? places[sted].id : null, note: null, src: null,
+        minutter: 120, paamelding: false, plasser: null, paaChat: null, sort: null
+      });
+      idag.items.length = 0;                 // bare de to, saa sjekken er entydig
+      idag.items.push(lag("s1", "Gruppe A — Eiffeltaarnet", "eiffel"));
+      idag.items.push(lag("s2", "Gruppe B — Orsay", "orsay"));
+      idag.items.sort((a, b) => String(a.t).localeCompare(String(b.t)));
+    }
+  }
+
   const stedMap = {};
   Object.values(places).forEach(p => { stedMap[p.id] = p; });
 

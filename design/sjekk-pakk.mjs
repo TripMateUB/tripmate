@@ -277,6 +277,29 @@ for (const [flagg, venta] of [["", /står fortsatt uten posisjon/], ["&vaerfeil=
     async () => await s3.$("[data-vaerigjen]") !== null);
   await s3.close();
 }
+
+/* To ting paa samme tid: naa-kortet viste bare den ene. */
+{
+  const s4 = await (await nb.newContext({ ...devices["iPhone 13"] })).newPage();
+  s4.on("pageerror", e => feil.push("pageerror (samtidig): " + e));
+  await s4.goto(`http://localhost:${process.env.PORT || 4321}/design/demo.html?samtidig=1`, { waitUntil: "networkidle" });
+  await s4.waitForSelector("#tabbar button");
+  await s4.waitForTimeout(600);
+  await sjekk("naa-kortet viser det andre punktet som skjer samtidig", async () =>
+    (await s4.$$eval(".ogsaarad", e => e.length)) === 1);
+  await sjekk("den samtidige raden har bade tid, tittel og sted", async () => {
+    const t = await s4.$eval(".ogsaarad", e => e.textContent.replace(/\s+/g, " "));
+    return /\d\d:\d\d/.test(t) && /Gruppe B/.test(t) && /Orsay/.test(t);
+  });
+  await sjekk("raden er stor nok til aa treffes", async () =>
+    (await s4.$eval(".ogsaarad", e => Math.round(e.getBoundingClientRect().height))) >= 44);
+  await sjekk("den samtidige raden apner sitt eget punkt", async () => {
+    await s4.evaluate(() => document.querySelector(".ogsaarad").click());
+    await s4.waitForTimeout(500);
+    return /Gruppe B/.test(await s4.$eval("#sheet", e => e.textContent));
+  });
+  await s4.close();
+}
 console.log("OK:\n  " + ok.join("\n  "));
 console.log(nei.length ? "\nFEIL:\n  " + nei.join("\n  ") : "\nFEIL: ingen");
 console.log(feil.length ? "KONSOLL:\n  " + feil.join("\n  ") : "KONSOLL: rent");

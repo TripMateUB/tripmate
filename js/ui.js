@@ -482,11 +482,26 @@ const UI = (() => {
     let kort = "";
     if (ne) {
       const p = ne.item.place ? trip.places[ne.item.place] : null;
+      // Skjer to ting på én gang, er ikke den ene mer «nå» enn den andre.
+      // Kortet viste bare den første, og da sto halve dagen usynlig på
+      // den skjermen folk faktisk ser om morgenen.
+      const ogsaa = samtidigeMed(ne.day, ne.item);
       kort = `<section class="naakort">
         <div class="merk"><i></i>${ne.naa ? "Nå" : ne.day.date === today() ? "Nå snart" : "Neste · " + esc(ne.day.label)}</div>
         <div class="kl">${ne.item.t ? esc(tidTekst(ne.item)) : "—"}</div>
         <div class="hva">${esc(ne.item.title)}${vaerMerke(ne.item.place, ne.day.date, ne.item.t, dagensSted(ne.day))}</div>
         ${p ? `<div class="hvor">${esc(p.name)}${p.addr ? " · " + esc(p.addr) : ""}</div>` : ""}
+        ${ogsaa.length ? `<div class="ogsaa">
+          <div class="ogsaatopp">Samtidig</div>
+          ${ogsaa.map(x => {
+            const q = x.place ? trip.places[x.place] : null;
+            return `<button class="ogsaarad" data-item="${esc(x.id)}">
+              <span class="t">${esc(tidTekst(x))}</span>
+              <span class="grow"><span class="h">${esc(x.title)}</span>
+                ${q ? `<span class="s">${esc(q.name)}</span>` : ""}</span>
+              <span class="pil">${ICON.chev}</span></button>`;
+          }).join("")}
+        </div>` : ""}
         <div class="knapper">
           ${p ? kartKnapp(p, "primar") : ""}
           <button class="btn" data-tab="program">Hele dagen</button>
@@ -574,6 +589,18 @@ const UI = (() => {
   }
 
   const tidTekst = i => { const s = slutt(i); return s ? i.t + "–" + s : i.t; };
+
+  /* De andre punktene som deler tid med dette ene. «samtidige» svarer
+     for hele dagen; her trengs naboene til ett punkt. */
+  function samtidigeMed(dag, i) {
+    if (!i.t) return [];
+    const a0 = minutt(i.t), a1 = a0 + (i.minutter || 0);
+    return dag.items.filter(x => {
+      if (x.id === i.id || !x.t) return false;
+      const b0 = minutt(x.t), b1 = b0 + (x.minutter || 0);
+      return b0 === a0 || (a0 < b1 && b0 < a1);
+    });
+  }
 
   /* Hvilke punkter deler tid med et annet. To uten varighet teller som
      samtidige bare hvis de starter på samme klokkeslett. */
