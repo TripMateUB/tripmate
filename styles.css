@@ -1189,3 +1189,14 @@ label.person span{flex:1;min-width:0}
 .naakort .ogsaavaer{flex:none;display:flex;align-items:center}
 .naakort .ogsaavaer .vaer{float:none;margin:0;color:inherit;opacity:.9}
 .naakort .ogsaavaer:empty{display:none}
+
+/* En byttefoerespoersel gjelder to personer, og svaret er ja eller nei.
+   Derfor to knapper paa egen linje, ikke en rad man maa tolke. */
+.bytterad{padding:10px 0;border-bottom:1px solid var(--line-soft)}
+.bytterad:last-child{border-bottom:0}
+.bytterad .nm{font-family:"DM Sans",sans-serif;font-weight:600;font-size:15px}
+.bytterad .sub{font-size:13px;color:var(--ink-2);margin-top:2px}
+.byttevalg{display:flex;gap:8px;margin-top:10px}
+.byttevalg .btn{flex:1}
+/* Et sete noen har spurt om: merket, saa reiselederen ser hvor det staar. */
+.setet.spurt{box-shadow:0 0 0 2px var(--amber)}

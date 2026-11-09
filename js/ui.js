@@ -12,6 +12,7 @@ const UI = (() => {
     side: null, varselStatus: null, varselEnheter: null, varselTest: null,
     folk: null, folkFeil: false, sisteVisning: null,
     vaerJobber: false,
+    rom: null, romFeil: false,
     pakk: null, pakkFeil: false, setekart: null, seteFeil: false,
     megTall: null,                          // tallene som står til høyre i Meg
     sideChat: null, chatFolk: null, ventende: 0, vedlegg: null, sender: false, sisteComposer: null };
@@ -571,6 +572,11 @@ const UI = (() => {
           <span class="rikon">${ICON.sete}</span>
           <div class="grow"><div class="nm">Sitteplasser</div></div>
           <span class="verdi">${setetekst(tall)}</span>
+          <span class="chev">${ICON.chev}</span></button>
+
+        <button class="listrow" data-side="rom">
+          <span class="rikon grunn">${ICON.nokkel}</span>
+          <div class="grow"><div class="nm">Rom</div></div>
           <span class="chev">${ICON.chev}</span></button>
       </div></div>
     </div>`;
@@ -1513,7 +1519,7 @@ const UI = (() => {
     $("convhead").querySelector(".t").dataset.chatside = conv ? conv.id : "";
 
     if (side) {
-      const sidenavn = { deltakere: "Deltakere og roller", varsler: "Varsler", chat: "Om chatten",
+      const sidenavn = { deltakere: "Deltakere og roller", varsler: "Varsler", chat: "Om chatten", rom: "Rom",
                          pakk: "Pakkeliste", seter: "Sitteplasser" };
       $("convName").textContent = sidenavn[side] || "";
       $("convSub").textContent = S.trip.name;
@@ -1566,6 +1572,7 @@ const UI = (() => {
                           : side === "chat" ? viewChatside()
                           : side === "pakk" ? viewPakk()
                           : side === "seter" ? viewSeter()
+                          : side === "rom" ? viewRom()
                           : side === "deltakere" ? viewDeltakere()
                           : visningFor(S.tab);
     if (side === "varsler") settOppVarsler();
@@ -2952,6 +2959,15 @@ const UI = (() => {
     if (S.side === "pakk") render();
   }
 
+  async function aapneRom(fraHistorikk) {
+    S.side = "rom"; S.rom = null; S.romFeil = false;
+    if (!fraHistorikk) history.pushState({ side: "rom" }, "");
+    render();
+    try { S.rom = await Api.romkart(S.trip.id); }
+    catch { S.rom = { rom: [], alle: [] }; S.romFeil = true; }
+    if (S.side === "rom") render();
+  }
+
   async function aapneSeter(fraHistorikk) {
     S.side = "seter"; S.setekart = null; S.seteFeil = false;
     if (!fraHistorikk) history.pushState({ side: "seter" }, "");
@@ -3019,8 +3035,8 @@ const UI = (() => {
   function viewSeter() {
     const leder = S.trip.role === "leader";
     if (S.seteFeil) return '<p class="muted">Klarte ikke hente setekartene. Sjekk nettet og prøv igjen.</p>';
-    const kart = S.setekart;
-    if (!kart) return venter("Henter setekartene");
+    if (!S.setekart) return venter("Henter setekartene");
+    const kart = S.setekart.kjoretoy;
 
     const nyknapp = leder
       ? `<button class="btn big" data-nykj="1">Legg til kjøretøy</button>`
@@ -3028,19 +3044,72 @@ const UI = (() => {
 
     if (!kart.length) return `
       <p class="muted" style="margin:0">${leder
-        ? "Legg inn hvert kjøretøy turen bruker — en buss, et fly, to minibusser. Alle velger sin egen plass i hvert av dem."
+        ? "Legg inn hvert kjøretøy turen bruker. Har dere buss ned og tog hjem, er det to oppsett — og én plass i hvert."
         : "Reiselederen har ikke satt opp noe setekart ennå."}</p>
       ${nyknapp}`;
 
-    // Mangler du plass et sted, er det det eneste du trenger å vite her.
-    const uten = kart.filter(k => !k.seter.some(s2 => s2.meg));
     return `
-      <p class="muted" style="margin:0">${uten.length
-        ? `Du mangler plass i ${uten.length === kart.length && kart.length === 1
-            ? "kartet under" : `${uten.length} av ${kart.length}`}. Trykk på et ledig sete.`
-        : "Du har plass i alle. Trykk på et ledig sete for å bytte."}</p>
+      ${bytteliste(kart, leder)}
+      ${toppTekst(kart, leder)}
       ${kart.map(k => kjoretoykort(k, leder)).join("")}
       ${nyknapp}`;
+  }
+
+  function toppTekst(kart, leder) {
+    const mine = kart.filter(k => !k.seter.some(s2 => s2.meg));
+    if (leder) {
+      const tomme = kart.reduce((n, k) => n + (k.plasser - k.seter.length), 0);
+      return `<p class="muted" style="margin:0">${kart.length} oppsett · ${tomme} ledige plasser til sammen.</p>`;
+    }
+    if (!mine.length) return '<p class="muted" style="margin:0">Du har plass i alle.</p>';
+    return `<p class="muted" style="margin:0">Du mangler plass i ${mine.length === kart.length && kart.length === 1
+      ? "kartet under" : `${mine.length} av ${kart.length}`}.</p>`;
+  }
+
+  /* Forespørsler om bytte. Et bytte gjelder to personer, så det som
+     venter på deg skal stå øverst — ikke gjemt inne i et setekart der
+     man må lete etter den ene ruta som ser litt annerledes ut. */
+  function bytteliste(kart, leder) {
+    const rader = [];
+    for (const k of kart) {
+      const bredde = oppsett(k.typ).bredde;
+      for (const x of k.bytter) {
+        const plass = setenavn(x.nr, bredde);
+        if (x.tilMeg && x.status === "venter_andre") {
+          rader.push({
+            hva: `${esc(x.fra)} vil bytte til plassen din ${plass} i ${esc(k.navn)}`,
+            under: k.godkjenn ? "Sier du ja, går den videre til reiselederen." : "Sier du ja, er byttet gjort.",
+            knapper: `<button class="btn primary" data-svarbytte="${esc(x.id)}" data-ja="1">Ja</button>
+                      <button class="btn" data-svarbytte="${esc(x.id)}">Nei</button>`
+          });
+        } else if (leder && x.status === "venter_leder") {
+          rader.push({
+            hva: `${esc(x.fra)} vil ha ${plass} i ${esc(k.navn)}`,
+            under: x.til ? `${esc(x.til)} har sagt ja.` : "Plassen står tom.",
+            knapper: `<button class="btn primary" data-avgjorbytte="${esc(x.id)}" data-ja="1">Godkjenn</button>
+                      <button class="btn" data-avgjorbytte="${esc(x.id)}">Avslå</button>`
+          });
+        } else if (x.fraMeg) {
+          rader.push({
+            hva: `Du har spurt om ${plass} i ${esc(k.navn)}`,
+            under: x.status === "venter_andre"
+              ? `Venter på svar fra ${esc(x.til || "den som sitter der")}.`
+              : "Venter på reiselederen.",
+            knapper: `<button class="btn" data-trekkbytte="${esc(x.id)}">Trekk</button>`
+          });
+        }
+      }
+    }
+    if (!rader.length) return "";
+    return `<div>
+      <div class="eyebrow" style="margin-bottom:8px;color:var(--amber)">Bytter · ${rader.length}</div>
+      <div class="card pad" style="border-left:3px solid var(--amber)">
+        ${rader.map(r => `<div class="bytterad">
+          <div class="nm">${r.hva}</div>
+          <div class="sub">${r.under}</div>
+          <div class="byttevalg">${r.knapper}</div>
+        </div>`).join("")}
+      </div></div>`;
   }
 
   /* Ett kjøretøy: navnet, din plass, og kartet. Midtgangen tegnes som
@@ -3051,6 +3120,7 @@ const UI = (() => {
     const tatt = new Map(k.seter.map(s2 => [s2.nr, s2]));
     const mitt = k.seter.find(s2 => s2.meg);
     const rader = Math.ceil(k.plasser / o.bredde);
+    const spurt = new Set(k.bytter.map(x => x.nr));
 
     const rad = r => {
       const ut = [];
@@ -3061,9 +3131,13 @@ const UI = (() => {
         const s2 = tatt.get(nr), min = Boolean(s2 && s2.meg);
         const plass = setenavn(nr, o.bredde);
         const hvem = min ? "Deg" : s2 ? fornavn(s2.hvem) : "";
-        ut.push(`<button class="setet ${min ? "min" : s2 ? "tatt" : ""}"
-          data-sete="${nr}" data-kj="${esc(k.id)}" ${s2 && !min ? "disabled" : ""}
-          aria-label="${plass} i ${esc(k.navn)} — ${s2 ? esc(min ? "deg" : s2.hvem) : "ledig"}"
+        // Et sete kan trykkes av alle nå: reiselederen for å sette noen
+        // der, deltakeren for å ta det eller spørre om det. Et sete som
+        // ikke kan trykkes gir ingen beskjed om hvorfor.
+        ut.push(`<button class="setet ${min ? "min" : s2 ? "tatt" : ""}${spurt.has(nr) ? " spurt" : ""}"
+          data-sete="${nr}" data-kj="${esc(k.id)}"
+          aria-label="${plass} i ${esc(k.navn)} — ${s2 ? esc(min ? "deg" : s2.hvem) : "ledig"}${
+            spurt.has(nr) ? ", noen har spurt om den" : ""}"
           ><b>${plass}</b>${hvem ? `<small>${esc(hvem)}</small>` : ""}</button>`);
       }
       return `<div class="seterad">${ut.join("")}</div>`;
@@ -3074,16 +3148,180 @@ const UI = (() => {
     const status = mitt
       ? `du har ${setenavn(mitt.nr, o.bredde)}`
       : `${k.seter.length} tatt`;
+    const maate = k.fritt ? "alle velger selv" : "reiselederen fordeler";
 
     return `<div class="kjkort">
       <div class="kjtopp">
         <div class="grow"><b>${esc(k.navn)}</b>
-          <small>${esc(o.navn)} · ${k.plasser} plasser · ${esc(status)}</small></div>
+          <small>${esc(o.navn)} · ${k.plasser} plasser · ${esc(status)} · ${esc(maate)}</small></div>
         ${leder ? `<button class="minibtn" data-endrekj="${esc(k.id)}"
           aria-label="Endre ${esc(k.navn)}">${ICON.blyant}</button>` : ""}
       </div>
+      ${leder ? `<div class="gruppe" style="margin-bottom:12px"><div class="list">
+        <label class="listrow" style="cursor:pointer">
+          <div class="grow"><div class="nm">Deltakerne velger selv</div>
+            <div class="sub">Av: du setter hvem som sitter hvor.</div></div>
+          <input type="checkbox" class="bryter" data-kjfritt="${esc(k.id)}" ${k.fritt ? "checked" : ""}></label>
+        <label class="listrow" style="cursor:pointer">
+          <div class="grow"><div class="nm">Jeg må godkjenne bytter</div>
+            <div class="sub">Av: det holder at den andre sier ja.</div></div>
+          <input type="checkbox" class="bryter" data-kjgodkjenn="${esc(k.id)}" ${k.godkjenn ? "checked" : ""}></label>
+      </div></div>` : ""}
       <div class="setekart">${Array.from({ length: rader }, (_, r) => rad(r)).join("")}</div>
     </div>`;
+  }
+
+  /* Rom er ikke et setekart. Ingen midtgang, ingen nummerering man
+     sikter på — bare navnet, hvor mange senger, og hvem som bor der.
+     Derfor en liste og ikke et rutenett. */
+  function viewRom() {
+    const leder = S.trip.role === "leader";
+    if (S.romFeil) return '<p class="muted">Klarte ikke hente romfordelingen. Sjekk nettet og prøv igjen.</p>';
+    if (!S.rom) return venter("Henter romfordelingen");
+    const { rom, alle } = S.rom;
+
+    const nyknapp = leder
+      ? `<button class="btn big" data-nyttrom="1">Legg til rom</button>`
+      : "";
+
+    if (!rom.length) return `
+      <p class="muted" style="margin:0">${leder
+        ? "Legg inn rommene, så fordeler du folk på dem. Alle ser hvem de bor med."
+        : "Reiselederen har ikke satt opp rom ennå."}</p>
+      ${nyknapp}`;
+
+    const uten = alle.filter(p => !p.rom);
+    const mitt = rom.find(r => r.folk.some(p => p.meg));
+
+    return `
+      <p class="muted" style="margin:0">${mitt
+        ? `Du bor på <b>${esc(mitt.navn)}</b>.`
+        : leder ? `${rom.length} rom · ${uten.length} uten seng.`
+                : "Du har ikke fått rom ennå."}</p>
+
+      ${leder && uten.length ? `<div>
+        <div class="eyebrow" style="margin-bottom:8px;color:var(--amber)">Uten seng · ${uten.length}</div>
+        <div class="card pad" style="border-left:3px solid var(--amber)">
+          <div class="memberlist">${uten.map(p => `<div class="person">
+            <span>${esc(p.navn)}${p.leder ? ' <em>reiseleder</em>' : ""}</span>
+            <button class="linkbtn" data-settrom="${esc(p.id)}">gi rom</button>
+          </div>`).join("")}</div>
+        </div></div>` : ""}
+
+      ${rom.map(r => `<div class="kjkort">
+        <div class="kjtopp">
+          <div class="grow"><b>${esc(r.navn)}</b>
+            <small>${r.folk.length} av ${r.plasser} senger</small></div>
+          ${leder ? `<button class="minibtn" data-endrerom="${esc(r.id)}"
+            aria-label="Endre ${esc(r.navn)}">${ICON.blyant}</button>` : ""}
+        </div>
+        ${r.folk.length
+          ? `<div class="memberlist">${r.folk.map(p => `<div class="person">
+              <span>${esc(p.navn)}${p.meg ? " <em>deg</em>" : ""}</span>
+              ${leder ? `<button class="linkbtn" data-utavrom="${esc(p.id)}">ta ut</button>` : ""}
+            </div>`).join("")}</div>`
+          : `<p class="muted" style="margin:0">Ingen her ennå.</p>`}
+        ${leder && r.folk.length < r.plasser
+          ? `<button class="btn" style="width:100%;margin-top:10px" data-fyllrom="${esc(r.id)}">Legg til noen</button>`
+          : ""}
+      </div>`).join("")}
+      ${nyknapp}`;
+  }
+
+  /* Hvem skal inn? Lista er alle på turen, med rommet de har i dag
+     ved siden av — ellers må man huske det selv mens man fordeler. */
+  function sheetVelgPerson(romId) {
+    const { rom, alle } = S.rom;
+    const r = rom.find(x => x.id === romId);
+    const navnPaa = id => (rom.find(x => x.id === id) || {}).navn || "";
+    openSheet(`<h3>Hvem skal på ${esc(r ? r.navn : "rommet")}?</h3>
+      <p class="lede">${r ? `${r.folk.length} av ${r.plasser} senger er tatt.` : ""}</p>
+      <div class="memberlist">${alle.map(p => `<div class="person">
+        <span>${esc(p.navn)}${p.leder ? ' <em>reiseleder</em>' : ""}${
+          p.rom ? ` <em>${esc(navnPaa(p.rom))}</em>` : ""}</span>
+        ${p.rom === romId
+          ? `<span class="tag">her</span>`
+          : `<button class="linkbtn" data-romvalg="${esc(p.id)}" data-rom="${esc(romId)}">velg</button>`}
+      </div>`).join("")}</div>
+      <button class="btn close" data-close>Lukk</button>`);
+  }
+
+  /* Og motsatt vei: personen er valgt, nå skal rommet velges. */
+  function sheetVelgRom(personId) {
+    const { rom, alle } = S.rom;
+    const p = alle.find(x => x.id === personId);
+    openSheet(`<h3>Rom til ${esc(p ? p.navn : "deltakeren")}</h3>
+      <div class="gruppe"><div class="list">
+        ${rom.map(r => `<button class="listrow" data-romvalg="${esc(personId)}" data-rom="${esc(r.id)}"
+          ${r.folk.length >= r.plasser && p && p.rom !== r.id ? "disabled" : ""}>
+          <div class="grow"><div class="nm">${esc(r.navn)}</div>
+            <div class="sub">${r.folk.length} av ${r.plasser} senger</div></div>
+          ${p && p.rom === r.id ? '<span class="verdi">her nå</span>' : ""}
+          <span class="chev">${ICON.chev}</span></button>`).join("")}
+      </div></div>
+      ${p && p.rom ? `<button class="btn danger" style="width:100%;margin-top:10px"
+        data-romvalg="${esc(personId)}">Ta ut av rommet</button>` : ""}
+      <button class="btn close" data-close>Avbryt</button>`);
+  }
+
+  function sheetRom(id) {
+    const r = id && S.rom.rom.find(x => x.id === id);
+    openSheet(`<h3>${r ? "Endre rom" : "Nytt rom"}</h3>
+      <form id="romForm">
+        <div class="field"><label for="rmNavn">Navn</label>
+          <input id="rmNavn" type="text" maxlength="40" placeholder="Rom 204"
+            value="${r ? esc(r.navn) : ""}" autocomplete="off"></div>
+        <div class="field"><label for="rmAnt">Antall senger</label>
+          <input id="rmAnt" type="number" min="1" max="40" inputmode="numeric" value="${r ? r.plasser : 4}"></div>
+        <p class="err" id="rmErr" hidden></p>
+        <button class="btn primary big" type="submit" id="rmLagre">Lagre</button>
+      </form>
+      ${r ? `<button class="btn danger" style="width:100%;margin-top:10px"
+        data-slettrom="${esc(r.id)}">Slett rommet</button>` : ""}
+      <button class="btn close" data-close>Avbryt</button>`);
+
+    $("romForm").addEventListener("submit", async e => {
+      e.preventDefault();
+      const err = $("rmErr"), btn = $("rmLagre");
+      const navn = $("rmNavn").value.trim();
+      const plasser = parseInt($("rmAnt").value, 10);
+      if (!navn) { err.textContent = "Gi rommet et navn."; err.hidden = false; return; }
+      if (!plasser || plasser < 1 || plasser > 40) {
+        err.textContent = "Antall senger må være mellom 1 og 40."; err.hidden = false; return;
+      }
+      btn.disabled = true; btn.textContent = "Lagrer…";
+      try {
+        if (r) await Api.endreRom(r.id, navn, plasser);
+        else await Api.nyttRom(S.trip.id, navn, plasser);
+        closeSheet();
+        await aapneRom(true);
+      } catch (e2) {
+        btn.disabled = false; btn.textContent = "Lagre";
+        err.textContent = e2.message; err.hidden = false;
+      }
+    });
+  }
+
+  /* Reiselederen setter en person på en plass. «Ingen» tømmer den. */
+  function sheetSete(kjoretoyId, nr) {
+    const k = S.setekart.kjoretoy.find(x => x.id === kjoretoyId);
+    if (!k) return;
+    const o = oppsett(k.typ);
+    const plass = setenavn(nr, o.bredde);
+    const paa = k.seter.find(s2 => s2.nr === nr);
+    const hvor = new Map(k.seter.map(s2 => [s2.id, setenavn(s2.nr, o.bredde)]));
+    openSheet(`<h3>${plass} i ${esc(k.navn)}</h3>
+      <p class="lede">${paa ? `${esc(paa.hvem)} sitter her nå.` : "Plassen er ledig."}</p>
+      <div class="memberlist">${S.setekart.alle.map(p => `<div class="person">
+        <span>${esc(p.navn)}${hvor.has(p.id) ? ` <em>${esc(hvor.get(p.id))}</em>` : ""}</span>
+        ${paa && paa.id === p.id
+          ? `<span class="tag">her</span>`
+          : `<button class="linkbtn" data-setevalg="${esc(p.id)}"
+              data-kj="${esc(kjoretoyId)}" data-nr="${nr}">velg</button>`}
+      </div>`).join("")}</div>
+      ${paa ? `<button class="btn danger" style="width:100%;margin-top:10px"
+        data-setevalg="" data-kj="${esc(kjoretoyId)}" data-nr="${nr}">Gjør plassen ledig</button>` : ""}
+      <button class="btn close" data-close>Lukk</button>`);
   }
 
   function sheetNyttPakk(egen) {
@@ -3909,15 +4147,28 @@ const UI = (() => {
 
   /* ───────────────── hendelser ───────────────── */
   document.addEventListener("change", async e => {
-    const bryter = e.target.closest("[data-chatskriv]");
+    const bryter = e.target.closest("[data-chatskriv],[data-kjfritt],[data-kjgodkjenn]");
     if (!bryter) return;
-    const id = bryter.dataset.chatskriv, paa = bryter.checked;
-    try { await Api.settChatSkriving(id, paa); render(); }
-    catch { bryter.checked = !paa; toast("Klarte ikke lagre. Har du kjørt siste SQL?"); }
+    const paa = bryter.checked;
+    try {
+      if (bryter.dataset.chatskriv) {
+        await Api.settChatSkriving(bryter.dataset.chatskriv, paa);
+        render();
+      } else if (bryter.dataset.kjfritt) {
+        await Api.settKjoretoyvalg(bryter.dataset.kjfritt, { fritt: paa });
+        await aapneSeter(true);
+      } else {
+        await Api.settKjoretoyvalg(bryter.dataset.kjgodkjenn, { godkjenn: paa });
+        await aapneSeter(true);
+      }
+    } catch {
+      bryter.checked = !paa;
+      toast("Klarte ikke lagre. Har du kjørt siste SQL?");
+    }
   });
 
   document.addEventListener("click", async e => {
-    const t = e.target.closest("[data-tab],[data-side],[data-pakk],[data-slettpakk],[data-sete],[data-nykj],[data-endrekj],[data-slettkj],[data-vaerigjen],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-msgmeny],[data-chat],[data-paa],[data-slettchat],[data-bilde],[data-slettbilde],[data-bvlukk],[data-bvmeny],[data-lagrebilde],[data-kopimeld],[data-deltekst],[data-chatside],[data-cmadd],[data-cmdel],[data-cmleave],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn,#skjulInstall,#installKnapp");
+    const t = e.target.closest("[data-tab],[data-side],[data-pakk],[data-slettpakk],[data-sete],[data-setevalg],[data-nykj],[data-endrekj],[data-slettkj],[data-vaerigjen],[data-svarbytte],[data-avgjorbytte],[data-trekkbytte],[data-nyttrom],[data-endrerom],[data-slettrom],[data-fyllrom],[data-settrom],[data-romvalg],[data-utavrom],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-msgmeny],[data-chat],[data-paa],[data-slettchat],[data-bilde],[data-slettbilde],[data-bvlukk],[data-bvmeny],[data-lagrebilde],[data-kopimeld],[data-deltekst],[data-chatside],[data-cmadd],[data-cmdel],[data-cmleave],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn,#skjulInstall,#installKnapp");
     if (!t) return;
 
     if (t.id === "joinTilbake") { S.fraStart = false; return visAuth("start"); }
@@ -3969,7 +4220,9 @@ const UI = (() => {
 
     if (t.dataset.side) {
       closeSheet();
-      return t.dataset.side === "pakk" ? aapnePakk() : aapneSeter();
+      if (t.dataset.side === "pakk") return aapnePakk();
+      if (t.dataset.side === "rom") return aapneRom();
+      return aapneSeter();
     }
 
     // Krysset settes med en gang på skjermen. Går det galt, settes det
@@ -3995,20 +4248,89 @@ const UI = (() => {
 
     if (t.dataset.sete && t.dataset.kj) {
       const nr = parseInt(t.dataset.sete, 10);
-      const k = (S.setekart || []).find(x => x.id === t.dataset.kj);
+      const k = ((S.setekart || {}).kjoretoy || []).find(x => x.id === t.dataset.kj);
       if (!k) return;
+      const leder = S.trip.role === "leader";
       const mitt = k.seter.find(x => x.meg);
+      const paa = k.seter.find(x => x.nr === nr);
       const navn = setenavn(nr, oppsett(k.typ).bredde);
+
+      // Reiselederen fordeler: da er et trykk et valg om hvem, ikke om deg.
+      if (leder && !k.fritt) return sheetSete(k.id, nr);
+
       try {
         if (mitt && mitt.nr === nr) {
+          if (!k.fritt) return;                // du satte den ikke selv
           if (!confirm(`Slippe plassen ${navn} i ${k.navn}?`)) return;
           await Api.slippSete(k.id);
-        } else {
+        } else if (k.fritt && !paa) {
           await Api.taSete(k.id, nr);
+        } else {
+          // Noen sitter der, eller reiselederen fordeler: da spør man.
+          const hvem = paa ? paa.hvem : null;
+          if (!confirm(hvem
+            ? `Be ${hvem} om å bytte til ${navn} i ${k.navn}?`
+            : `Be om plassen ${navn} i ${k.navn}?`)) return;
+          await Api.beOmBytte(k.id, nr);
+          toast(hvem ? "Spurt. Du får beskjed når de svarer." : "Spurt. Reiselederen avgjør.");
         }
         await aapneSeter(true);
         hentMegTall(true);
       } catch (err) { toast(err.message); await aapneSeter(true); }
+      return;
+    }
+
+    if (t.dataset.setevalg !== undefined && t.dataset.kj) {
+      try {
+        await Api.settSete(t.dataset.kj, parseInt(t.dataset.nr, 10), t.dataset.setevalg || null);
+        closeSheet();
+        await aapneSeter(true);
+        hentMegTall(true);
+      } catch (err) { toast(err.message); }
+      return;
+    }
+
+    if (t.dataset.svarbytte) {
+      try { await Api.svarBytte(t.dataset.svarbytte, t.dataset.ja === "1"); await aapneSeter(true); hentMegTall(true); }
+      catch (err) { toast(err.message); await aapneSeter(true); }
+      return;
+    }
+    if (t.dataset.avgjorbytte) {
+      try { await Api.avgjorBytte(t.dataset.avgjorbytte, t.dataset.ja === "1"); await aapneSeter(true); hentMegTall(true); }
+      catch (err) { toast(err.message); await aapneSeter(true); }
+      return;
+    }
+    if (t.dataset.trekkbytte) {
+      try { await Api.trekkBytte(t.dataset.trekkbytte); await aapneSeter(true); }
+      catch (err) { toast(err.message); await aapneSeter(true); }
+      return;
+    }
+
+    // ───── rom ─────
+    if (t.hasAttribute("data-nyttrom")) return sheetRom(null);
+    if (t.dataset.endrerom) return sheetRom(t.dataset.endrerom);
+    if (t.dataset.fyllrom) return sheetVelgPerson(t.dataset.fyllrom);
+    if (t.dataset.settrom) return sheetVelgRom(t.dataset.settrom);
+
+    if (t.dataset.slettrom) {
+      const r = S.rom.rom.find(x => x.id === t.dataset.slettrom);
+      if (!confirm(`Slette ${r ? r.navn : "rommet"}? De som bor der blir stående uten seng.`)) return;
+      try { await Api.slettRom(t.dataset.slettrom); closeSheet(); await aapneRom(true); }
+      catch { toast("Klarte ikke slette rommet."); }
+      return;
+    }
+
+    if (t.dataset.romvalg) {
+      try {
+        await Api.settRom(S.trip.id, t.dataset.romvalg, t.dataset.rom || null);
+        closeSheet();
+        await aapneRom(true);
+      } catch (err) { toast(err.message); }
+      return;
+    }
+    if (t.dataset.utavrom) {
+      try { await Api.settRom(S.trip.id, t.dataset.utavrom, null); await aapneRom(true); }
+      catch (err) { toast(err.message); }
       return;
     }
 

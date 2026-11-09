@@ -10,7 +10,7 @@
    endrer noe, så får alle den nye versjonen: nye filadresser går utenom
    både service workeren og nettleserens eget mellomlager. */
 
-const BUILD = 102;
+const BUILD = 103;
 const CACHE = "tripmate-b" + BUILD;
 const MAALCACHE = "tripmate-maal";   // chatten et varsel peker til
 

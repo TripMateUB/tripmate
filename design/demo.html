@@ -72,15 +72,53 @@ const pakkEgen = [
   { id: "e1", txt: "Kamera", sort: 10, kryss: false },
   { id: "e2", txt: "Bok til bussen", sort: 20, kryss: true }
 ];
-const kjoretoy = [
-  { id: "k1", navn: "Buss 1", typ: "buss", plasser: 56, sort: 1,
-    seter: [{ nr: 14, meg: true, hvem: "Jonas Robstad" }, { nr: 3, hvem: "Emma Nygård" },
-      { nr: 4, hvem: "Mathias Lund" }, { nr: 9, hvem: "Kari Reiseleder" },
-      { nr: 22, hvem: "Sofie Haugland" }, { nr: 23, hvem: "Ole Mikkelsen" }] },
-  { id: "k2", navn: "Fly ned", typ: "fly", plasser: 30, sort: 2,
-    seter: [{ nr: 1, hvem: "Emma Nygård" }, { nr: 2, hvem: "Mathias Lund" }] },
-  { id: "k3", navn: "Bil — reiselederne", typ: "bil", plasser: 5, sort: 3, seter: [] }
+const FOLK = [
+  { id: "meg", navn: "Jonas Robstad", leder: true },
+  { id: "u2", navn: "Emma Nygård", leder: false },
+  { id: "u3", navn: "Mathias Lund", leder: false },
+  { id: "u4", navn: "Kari Reiseleder", leder: true },
+  { id: "u5", navn: "Sofie Haugland", leder: false },
+  { id: "u6", navn: "Ole Mikkelsen", leder: false },
+  { id: "u7", navn: "Ida Strand", leder: false }
 ];
+const kjoretoy = [
+  { id: "k1", navn: "Buss ned", typ: "buss", plasser: 56, sort: 1, fritt: true, godkjenn: true,
+    seter: [{ nr: 14, meg: true, id: "meg", hvem: "Jonas Robstad" },
+      { nr: 3, id: "u2", hvem: "Emma Nygård" }, { nr: 4, id: "u3", hvem: "Mathias Lund" },
+      { nr: 9, id: "u4", hvem: "Kari Reiseleder" }, { nr: 22, id: "u5", hvem: "Sofie Haugland" },
+      { nr: 23, id: "u6", hvem: "Ole Mikkelsen" }],
+    bytter: [] },
+  { id: "k2", navn: "Fly ned", typ: "fly", plasser: 30, sort: 2, fritt: false, godkjenn: true,
+    seter: [{ nr: 1, id: "u2", hvem: "Emma Nygård" }, { nr: 2, id: "u3", hvem: "Mathias Lund" }],
+    bytter: [] },
+  { id: "k3", navn: "Bil — reiselederne", typ: "bil", plasser: 5, sort: 3, fritt: true, godkjenn: false,
+    seter: [], bytter: [] }
+];
+const rom = [
+  { id: "r1", navn: "Rom 204", plasser: 4, sort: 1, folk: ["meg", "u3"] },
+  { id: "r2", navn: "Rom 205", plasser: 2, sort: 2, folk: ["u2"] },
+  { id: "r3", navn: "Rom 206", plasser: 3, sort: 3, folk: [] }
+];
+
+/* Demoen avgjoer et bytte med en gang: her er det ingen base som
+   holder styr paa to trinn. */
+function lukkBytte(id, ja) {
+  for (const k of kjoretoy) {
+    const i = k.bytter.findIndex(x => x.id === id);
+    if (i < 0) continue;
+    const x = k.bytter[i];
+    if (ja) {
+      const fra = k.seter.find(s2 => s2.meg);
+      const til = k.seter.find(s2 => s2.nr === x.nr);
+      const gammel = fra ? fra.nr : null;
+      k.seter = k.seter.filter(s2 => s2 !== fra && s2 !== til);
+      k.seter.push({ nr: x.nr, id: "meg", meg: true, hvem: "Jonas Robstad" });
+      if (til && gammel != null) k.seter.push({ ...til, nr: gammel });
+    }
+    k.bytter.splice(i, 1);
+    return;
+  }
+}
 
 function lagApi() {
   const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
@@ -120,6 +158,17 @@ function lagApi() {
 
   // ?samtidig=1 legger to punkter paa samme klokkeslett litt fram i tid,
   // saa sjekkene kan se hva naa-kortet gjoer naar to ting skjer paa en gang.
+  // ?bytte=1 gir en foresporsel som venter paa deg, og en som venter
+  // paa reiselederen, saa begge radene kan maales.
+  if (VALG.has("bytte")) {
+    kjoretoy[0].bytter.push(
+      { id: "bA", kjoretoy: "k1", nr: 14, status: "venter_andre",
+        fraMeg: false, tilMeg: true, fra: "Emma Nygård", til: "Jonas Robstad" },
+      { id: "bB", kjoretoy: "k1", nr: 30, status: "venter_leder",
+        fraMeg: false, tilMeg: false, fra: "Sofie Haugland", til: null }
+    );
+  }
+
   if (VALG.has("samtidig")) {
     const idag = days.find(x => x.date === new Date().toISOString().slice(0, 10));
     if (idag) {
@@ -307,13 +356,89 @@ function lagApi() {
       l.length = 0; l.push(...ny);
       return Promise.resolve();
     },
-    setekart: () => Promise.resolve(kjoretoy.map(k => ({ ...k, seter: k.seter.map(s2 => ({ ...s2 })) }))),
+    setekart: () => Promise.resolve({
+      kjoretoy: kjoretoy.map(k => ({
+        ...k, seter: k.seter.map(s2 => ({ ...s2 })), bytter: k.bytter.map(x => ({ ...x }))
+      })),
+      alle: FOLK.map(p => ({ id: p.id, navn: p.navn }))
+    }),
+    settSete: (kj, nr, bruker) => {
+      const k = kjoretoy.find(x => x.id === kj);
+      if (!k) return Promise.reject(new Error("Fant ikke kjøretøyet."));
+      k.seter = k.seter.filter(s2 => s2.nr !== nr && s2.id !== bruker);
+      if (bruker) {
+        const p = FOLK.find(f => f.id === bruker);
+        k.seter.push({ nr, id: bruker, meg: bruker === "meg", hvem: p ? p.navn : "Ukjent" });
+      }
+      return Promise.resolve();
+    },
+    settKjoretoyvalg: (kj, v) => {
+      const k = kjoretoy.find(x => x.id === kj);
+      if (k) {
+        if (v.fritt !== undefined) k.fritt = v.fritt;
+        if (v.godkjenn !== undefined) k.godkjenn = v.godkjenn;
+      }
+      return Promise.resolve();
+    },
+    beOmBytte: (kj, nr) => {
+      const k = kjoretoy.find(x => x.id === kj);
+      if (!k) return Promise.reject(new Error("Fant ikke kjøretøyet."));
+      const paa = k.seter.find(s2 => s2.nr === nr);
+      if (paa && paa.meg) return Promise.reject(new Error("Det er plassen din."));
+      if (k.bytter.some(x => x.fraMeg)) return Promise.reject(new Error("Du har alt en forespørsel som venter her."));
+      k.bytter.push({
+        id: "b" + (k.bytter.length + 1), kjoretoy: kj, nr,
+        status: paa ? "venter_andre" : "venter_leder",
+        fraMeg: true, tilMeg: false, fra: "Jonas Robstad", til: paa ? paa.hvem : null
+      });
+      return Promise.resolve();
+    },
+    svarBytte: (id, ja) => { lukkBytte(id, ja); return Promise.resolve(); },
+    avgjorBytte: (id, ja) => { lukkBytte(id, ja); return Promise.resolve(); },
+    trekkBytte: id => { lukkBytte(id, false); return Promise.resolve(); },
+
+    romkart: () => Promise.resolve({
+      rom: rom.map(r => ({
+        id: r.id, navn: r.navn, plasser: r.plasser, sort: r.sort,
+        folk: r.folk.map(id => {
+          const p = FOLK.find(f => f.id === id) || {};
+          return { id, navn: p.navn || "Ukjent", meg: id === "meg" };
+        })
+      })),
+      alle: FOLK.map(p => ({
+        id: p.id, navn: p.navn, leder: p.leder, meg: p.id === "meg",
+        rom: (rom.find(r => r.folk.includes(p.id)) || {}).id || null
+      }))
+    }),
+    nyttRom: (t, navn, plasser) => {
+      rom.push({ id: "r" + (rom.length + 1), navn, plasser, sort: rom.length + 1, folk: [] });
+      return Promise.resolve();
+    },
+    endreRom: (id, navn, plasser) => {
+      const r = rom.find(x => x.id === id); if (r) { r.navn = navn; r.plasser = plasser; }
+      return Promise.resolve();
+    },
+    slettRom: id => {
+      const i = rom.findIndex(x => x.id === id); if (i >= 0) rom.splice(i, 1);
+      return Promise.resolve();
+    },
+    settRom: (t, bruker, romId) => {
+      for (const r of rom) r.folk = r.folk.filter(x => x !== bruker);
+      if (romId) {
+        const r = rom.find(x => x.id === romId);
+        if (!r) return Promise.reject(new Error("Fant ikke rommet."));
+        if (r.folk.length >= r.plasser) return Promise.reject(new Error("Rommet er fullt."));
+        r.folk.push(bruker);
+      }
+      return Promise.resolve();
+    },
     taSete: (kj, nr) => {
       const k = kjoretoy.find(x => x.id === kj);
       if (!k) return Promise.reject(new Error("Fant ikke kjøretøyet."));
+      if (!k.fritt) return Promise.reject(new Error("Reiselederen fordeler plassene her."));
       if (k.seter.some(s2 => s2.nr === nr)) return Promise.reject(new Error("Den plassen ble tatt av noen andre."));
       const i = k.seter.findIndex(s2 => s2.meg); if (i >= 0) k.seter.splice(i, 1);
-      k.seter.push({ nr, meg: true, hvem: "Jonas Robstad" }); return Promise.resolve();
+      k.seter.push({ nr, id: "meg", meg: true, hvem: "Jonas Robstad" }); return Promise.resolve();
     },
     slippSete: kj => {
       const k = kjoretoy.find(x => x.id === kj);
