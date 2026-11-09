@@ -2973,7 +2973,7 @@ const UI = (() => {
     if (!fraHistorikk) history.pushState({ side: "seter" }, "");
     render();
     try { S.setekart = await Api.setekart(S.trip.id); }
-    catch { S.setekart = []; S.seteFeil = true; }
+    catch { S.setekart = { kjoretoy: [], alle: [] }; S.seteFeil = true; }
     if (S.side === "seter") render();
   }
 
@@ -3354,7 +3354,7 @@ const UI = (() => {
   }
 
   function sheetKjoretoy(id) {
-    const k = id && (S.setekart || []).find(x => x.id === id);
+    const k = id && ((S.setekart || {}).kjoretoy || []).find(x => x.id === id);
     const typ = k ? k.typ : "buss";
     openSheet(`<h3>${k ? "Endre kjøretøy" : "Nytt kjøretøy"}</h3>
       <p class="lede">Typen bestemmer hvor bredt kartet står og hvor midtgangen går.</p>
@@ -4338,7 +4338,7 @@ const UI = (() => {
     if (t.dataset.endrekj) return sheetKjoretoy(t.dataset.endrekj);
 
     if (t.dataset.slettkj) {
-      const k = (S.setekart || []).find(x => x.id === t.dataset.slettkj);
+      const k = ((S.setekart || {}).kjoretoy || []).find(x => x.id === t.dataset.slettkj);
       if (!confirm(`Slette ${k ? k.navn : "kjøretøyet"}? Plassene alle har valgt forsvinner.`)) return;
       try {
         await Api.slettKjoretoy(t.dataset.slettkj);

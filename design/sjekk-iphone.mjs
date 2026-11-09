@@ -108,7 +108,7 @@ for (const fane of ["idag", "program", "chat", "meg"]) {
 /* Undersidene har sine egne knapper og sine egne lister, og det er der
    nye feil kommer inn. Måles med samme målebånd som fanene. */
 for (const [navn, vei] of [
-  ["pakk", '[data-side="pakk"]'], ["seter", '[data-side="seter"]']
+  ["pakk", '[data-side="pakk"]'], ["seter", '[data-side="seter"]'], ["rom", '[data-side="rom"]']
 ]) {
   await side.evaluate(() => document.querySelector('#tabbar button[data-tab="idag"]').click());
   await side.waitForTimeout(250);

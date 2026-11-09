@@ -88,10 +88,10 @@ const kjoretoy = [
       { nr: 9, id: "u4", hvem: "Kari Reiseleder" }, { nr: 22, id: "u5", hvem: "Sofie Haugland" },
       { nr: 23, id: "u6", hvem: "Ole Mikkelsen" }],
     bytter: [] },
-  { id: "k2", navn: "Fly ned", typ: "fly", plasser: 30, sort: 2, fritt: false, godkjenn: true,
+  { id: "k2", navn: "Fly ned", typ: "fly", plasser: 30, sort: 2, fritt: true, godkjenn: true,
     seter: [{ nr: 1, id: "u2", hvem: "Emma Nygård" }, { nr: 2, id: "u3", hvem: "Mathias Lund" }],
     bytter: [] },
-  { id: "k3", navn: "Bil — reiselederne", typ: "bil", plasser: 5, sort: 3, fritt: true, godkjenn: false,
+  { id: "k3", navn: "Bil — reiselederne", typ: "bil", plasser: 5, sort: 3, fritt: false, godkjenn: false,
     seter: [], bytter: [] }
 ];
 const rom = [
@@ -446,7 +446,8 @@ function lagApi() {
       return Promise.resolve();
     },
     nyttKjoretoy: (t, f) => {
-      kjoretoy.push({ id: "k" + (kjoretoy.length + 1), ...f, sort: kjoretoy.length + 1, seter: [] });
+      kjoretoy.push({ id: "k" + (kjoretoy.length + 1), ...f, sort: kjoretoy.length + 1,
+        fritt: true, godkjenn: true, seter: [], bytter: [] });
       return Promise.resolve();
     },
     endreKjoretoy: (id, f) => {

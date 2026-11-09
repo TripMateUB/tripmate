@@ -21,6 +21,10 @@ await side.waitForSelector("#tabbar button");
 
 /* Trykk via evaluate: åpningsbildet ligger over og tar ekte klikk. */
 const trykk = async v => { await side.evaluate(s => document.querySelector(s).click(), v); await side.waitForTimeout(420); };
+const trykkSiste = async v => {
+  await side.evaluate(s => { const n = document.querySelectorAll(s); n[n.length - 1].click(); }, v);
+  await side.waitForTimeout(420);
+};
 const antall = v => side.$$eval(v, e => e.length).catch(() => 0);
 
 /* ───── pakkelista ligger på I dag, ikke under Meg ───── */
@@ -110,8 +114,27 @@ await sjekk("min plass i bussen er markert", async () =>
   await side.$$eval(".kjkort", e => e[0].querySelectorAll(".setet.min").length) === 1);
 await sjekk("ingen plass i flyet ennå", async () =>
   await side.$$eval(".kjkort", e => e[1].querySelectorAll(".setet.min").length) === 0);
-await sjekk("tatte seter er avslått", async () =>
-  await side.$$eval(".kjkort", e => e[0].querySelectorAll(".setet.tatt[disabled]").length) === 5);
+// Et tatt sete er ikke lenger avslaatt: det er veien inn til aa spoerre
+// om aa bytte. Et sete som ikke kan trykkes sier ikke hvorfor.
+await sjekk("tatte seter kan trykkes", async () =>
+  (await side.$$eval(".kjkort", e => e[0].querySelectorAll(".setet.tatt[disabled]").length)) === 0 &&
+  (await side.$$eval(".kjkort", e => e[0].querySelectorAll(".setet.tatt").length)) === 5);
+await sjekk("reiselederen har to brytere per kjoeretoy", async () =>
+  (await side.$$eval(".kjkort", e => e[0].querySelectorAll(".bryter").length)) === 2);
+await sjekk("kortet sier hvordan plassene fordeles", async () => {
+  const t = await side.$$eval(".kjtopp small", e => e.map(x => x.textContent));
+  return /alle velger selv/.test(t[0]) && /reiselederen fordeler/.test(t[2]);
+});
+await sjekk("i et laast kjoeretoy setter reiselederen hvem som sitter der", async () => {
+  await side.evaluate(() => document.querySelectorAll(".kjkort")[2]
+    .querySelector(".setet:not(.tom)").click());
+  await side.waitForTimeout(450);
+  const h = await side.$eval("#sheet h3", e => e.textContent).catch(() => "");
+  const valg = await side.$$eval("[data-setevalg]", e => e.length);
+  await side.evaluate(() => document.querySelector("[data-close]").click());
+  await side.waitForTimeout(300);
+  return /1A i Bil/.test(h) && valg > 0;
+});
 
 await sjekk("et opptatt sete viser hvem som sitter der", async () =>
   await side.$$eval(".kjkort", e => {
@@ -133,13 +156,17 @@ const bussetet = () => side.$$eval(".kjkort", e => {
   const m = e[0].querySelector(".setet.min"); return m ? m.querySelector("b").textContent : null;
 });
 const forBuss = await bussetet();
-await trykk(".kjkort:nth-of-type(2) .setet:not(.tatt):not(.min):not(.tom):not([disabled])");
+await side.evaluate(() => document.querySelectorAll(".kjkort")[1]
+  .querySelector(".setet:not(.tatt):not(.min):not(.tom)").click());
+await side.waitForTimeout(420);
 await sjekk("fikk plass i flyet", async () =>
   await side.$$eval(".kjkort", e => e[1].querySelectorAll(".setet.min").length) === 1);
 await sjekk("bussplassen står urørt", async () => await bussetet() === forBuss);
 
 /* Bytt plass i bussen: den gamle skal bli ledig. */
-await trykk(".kjkort:nth-of-type(1) .setet:not(.tatt):not(.min):not(.tom):not([disabled])");
+await side.evaluate(() => document.querySelectorAll(".kjkort")[0]
+  .querySelector(".setet:not(.tatt):not(.min):not(.tom)").click());
+await side.waitForTimeout(420);
 await sjekk("byttet plass i bussen", async () => await bussetet() !== forBuss);
 await sjekk("bare én plass er min i bussen", async () =>
   await side.$$eval(".kjkort", e => e[0].querySelectorAll(".setet.min").length) === 1);
@@ -161,7 +188,7 @@ await sjekk("49 plasser, siste rad delvis fylt", async () =>
   await side.$$eval(".kjkort", e =>
     e[3].querySelectorAll(".setet:not(.tom)").length === 49 &&
     e[3].querySelectorAll(".setet.tom").length === 3));
-await trykk(".kjkort:nth-of-type(4) [data-endrekj]");
+await trykkSiste("[data-endrekj]");
 await sjekk("arket for endring er forhåndsfylt", async () =>
   await side.$eval("#kjNavn", e => e.value) === "Buss 2");
 await trykk("[data-slettkj]");
@@ -358,6 +385,37 @@ for (const [siden, venta, hva] of [
       /^\d\d:\d\d$/.test((await s6.$eval(".naakort .kl", e => e.textContent)).trim()));
   }
   await s6.close();
+}
+
+/* Rom: reiselederen fordeler, og ingen havner i to rom. */
+{
+  const s7 = await (await nb.newContext({ ...devices["iPhone 13"] })).newPage();
+  s7.on("pageerror", e => feil.push("pageerror (rom): " + e));
+  s7.on("dialog", d => d.accept());
+  await s7.goto(`http://localhost:${process.env.PORT || 4321}/design/demo.html`, { waitUntil: "networkidle" });
+  await s7.waitForSelector("#tabbar button");
+  await s7.evaluate(() => document.querySelector('[data-side="rom"]').click());
+  await s7.waitForTimeout(700);
+  const senger = () => s7.$$eval(".kjtopp small", e => e.map(x => x.textContent));
+  await sjekk("romsida viser rommene", async () => (await senger()).length === 3);
+  await sjekk("den som bor et sted ser hvor", async () =>
+    /Du bor på/.test(await s7.$eval("#screen p.muted", e => e.textContent)));
+  await sjekk("uten seng staar oeverst", async () =>
+    /Uten seng/.test(await s7.$eval("#screen", e => e.textContent)));
+
+  const foer = await senger();
+  await s7.evaluate(() => document.querySelector("[data-fyllrom]").click());
+  await s7.waitForTimeout(500);
+  await sjekk("arket spoer hvem som skal inn", async () =>
+    /Hvem skal på/.test(await s7.$eval("#sheet h3", e => e.textContent)));
+  await s7.evaluate(() => document.querySelector("[data-romvalg]").click());
+  await s7.waitForTimeout(700);
+  const etter = await senger();
+  await sjekk("personen flyttes, og blir ikke staaende to steder", async () =>
+    etter[0] !== foer[0] && etter.join("|") !== foer.join("|") &&
+    (await s7.$$eval(".kjkort .person", e => e.map(x => x.textContent.trim())))
+      .filter(t => /Emma/.test(t)).length === 1);
+  await s7.close();
 }
 console.log("OK:\n  " + ok.join("\n  "));
 console.log(nei.length ? "\nFEIL:\n  " + nei.join("\n  ") : "\nFEIL: ingen");
