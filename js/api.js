@@ -76,6 +76,10 @@ const Api = (() => {
         data = { session: res.data.session };
       }
       userId = data.session.user.id;
+      // Emnene appen lytter på er private (Utvidelse 25), og da må
+      // WebSocket-en vite hvem som lytter. Uten dette kobles den på som
+      // anonym og radsikkerheten avviser den.
+      try { await sb.realtime.setAuth(); } catch { /* prøver igjen ved påkobling */ }
       // Brukeren ligger alt i økta. Før spurte vi serveren om den på
       // nytt her, og det kallet lå først i køen — alt annet i oppstarten
       // ventet på et svar vi allerede hadde.
@@ -462,62 +466,99 @@ const Api = (() => {
     if (!error) cache.reactions[channelId] = data || [];
   }
 
-  /* Ett abonnement for hele turen, ikke ett per chat: da oppdateres både
-     chatlista og den samtalen som står åpen. Radsikkerheten sørger for at
-     vi bare får hendelser fra chatter vi har lov til å lese. */
+  /* Tre emner, ikke én strøm fra basen: programmet går til turens emne,
+     meldinger til hver chats eget, reaksjoner til sitt. Alle emnene deler
+     samme WebSocket, så antallet tilkoblinger er uendret — det er
+     antallet telefoner med skjermen på som teller mot grensen.
+
+     Hvorfor ikke postgres_changes lenger: der regnes radsikkerheten ut
+     på nytt for hver enkelt abonnent, for hver melding. Med hundre
+     påloggede går det bra. Med tusen på samme tur er den utregningen
+     flaskehalsen, og de som kobler seg på sist får ingenting. Nå gjør
+     basen den én gang, i en trigger (Utvidelse 25), og hvem som får
+     lytte avgjøres én gang ved påkobling.
+
+     Meldinger har hver chat sitt eget emne nettopp for at private
+     chatter skal forbli private: den som ikke får lese chatten, får
+     ikke lytte på emnet heller. */
+  const kanalSubs = new Map();   // channel_id → abonnement på meldinger
+
+  /* Broadcast leverer { operation, record, old_record }. Håndteringen
+     under er skrevet for { new, old } fra postgres_changes, så vi
+     oversetter her ved kanten i stedet for å skrive den om. */
+  function somEndring(msg) {
+    const p = (msg && msg.payload) || {};
+    return { new: p.record || null, old: p.old_record || null };
+  }
+
+  function lyttPaa(sub, fn) {
+    for (const ev of ["INSERT", "UPDATE", "DELETE"]) {
+      sub.on("broadcast", { event: ev }, msg => fn(somEndring(msg)));
+    }
+    return sub.subscribe();
+  }
+
+  function nyMelding(m) {
+    const list = cache.messages[m.channel_id];
+    if (list && !list.some(x => x.id === m.id)) {
+      list.push(shape(m));
+      list.sort((a, b) => a.ts.localeCompare(b.ts));
+    }
+    cache.recent = cache.recent || {};
+    cache.recent[m.channel_id] = {
+      txt: m.txt, who: m.author_name, ts: m.created_at, mine: m.author_id === userId
+    };
+    // Appen er framme, så telefonen får ikke noe varsel. Da må
+    // appen selv si fra — herfra, ikke fra push.
+    fire(m.author_id === userId ? null : {
+      nyMelding: { tur: m.trip_id, kanal: m.channel_id, hvem: m.author_name, txt: m.txt }
+    });
+  }
+
+  function slettetMelding(gml) {
+    // En slettehendelse inneholder bare nøkkelen — ikke hvilken chat
+    // meldingen lå i. Derfor leter vi i alle chattene vi har lastet.
+    const id = gml && gml.id;
+    if (!id) return;
+    let endret = false;
+    for (const list of Object.values(cache.messages)) {
+      const i = list.findIndex(m => m.id === id);
+      if (i > -1) { list.splice(i, 1); endret = true; }
+    }
+    if (endret) fire();
+  }
+
+  function nyttOmMelding(e) {
+    if (e.new) nyMelding(e.new);
+    else if (e.old) slettetMelding(e.old);
+  }
+
   function subscribeTrip(tripId) {
-    // openTrip() kjøres på nytt etter hver endring. Bygde vi abonnementet
-    // opp igjen hver gang, ville meldinger som kom i det lille glippet
-    // aldri dukket opp hos den som redigerer.
-    if (liveSub && liveTrip === tripId) return;
-    if (liveSub) { sb.removeChannel(liveSub); liveSub = null; }
+    // Bytter vi tur, skal ingenting fra den forrige henge igjen.
+    if (liveTrip && liveTrip !== tripId) kobleFra();
     liveTrip = tripId;
-    liveSub = sb.channel("tur-" + tripId)
-      .on("postgres_changes",
-          { event: "INSERT", schema: "public", table: "messages", filter: `trip_id=eq.${tripId}` },
-          payload => {
-            const m = payload.new;
-            const list = cache.messages[m.channel_id];
-            if (list && !list.some(x => x.id === m.id)) {
-              list.push(shape(m));
-              list.sort((a, b) => a.ts.localeCompare(b.ts));
-            }
-            cache.recent = cache.recent || {};
-            cache.recent[m.channel_id] = {
-              txt: m.txt, who: m.author_name, ts: m.created_at, mine: m.author_id === userId
-            };
-            // Appen er framme, så telefonen får ikke noe varsel. Da må
-            // appen selv si fra — herfra, ikke fra push.
-            fire(m.author_id === userId ? null : {
-              nyMelding: { tur: m.trip_id, kanal: m.channel_id, hvem: m.author_name, txt: m.txt }
-            });
-          })
-      .on("postgres_changes",
-          { event: "DELETE", schema: "public", table: "messages", filter: `trip_id=eq.${tripId}` },
-          payload => {
-            // En slettehendelse inneholder bare nøkkelen — ikke hvilken chat
-            // meldingen lå i. Derfor leter vi i alle chattene vi har lastet.
-            const id = payload.old && payload.old.id;
-            if (!id) return;
-            let endret = false;
-            for (const list of Object.values(cache.messages)) {
-              const i = list.findIndex(m => m.id === id);
-              if (i > -1) { list.splice(i, 1); endret = true; }
-            }
-            if (endret) fire();
-          })
-      // Programmet kan endres mens folk har appen åpen. Da skal skjermen
-      // følge med, ikke vise gårsdagens klokkeslett til noen lukker appen.
-      .on("postgres_changes",
-          { event: "*", schema: "public", table: "items", filter: `trip_id=eq.${tripId}` },
-          programEndret)
-      .on("postgres_changes",
-          { event: "*", schema: "public", table: "days", filter: `trip_id=eq.${tripId}` },
-          programEndret)
-      .on("postgres_changes",
-          { event: "*", schema: "public", table: "places", filter: `trip_id=eq.${tripId}` },
-          programEndret)
-      .subscribe();
+
+    if (!liveSub) {
+      liveSub = lyttPaa(
+        sb.channel("tur-" + tripId, { config: { private: true } }),
+        programEndret);
+    }
+
+    /* openTrip() kjøres på nytt etter hver endring, og chatter kan bli
+       lagt til mens appen står åpen. Vi legger til det som mangler og
+       fjerner det som er borte, i stedet for å rive ned alt: en
+       nedrivning midt i en samtale mister meldingene som kommer i det
+       lille glippet før abonnementet er oppe igjen. */
+    const vil = new Set(((cache.trip && cache.trip.channels) || []).map(c => c.id));
+    for (const [id, sub] of kanalSubs) {
+      if (!vil.has(id)) { sb.removeChannel(sub); kanalSubs.delete(id); }
+    }
+    for (const id of vil) {
+      if (kanalSubs.has(id)) continue;
+      kanalSubs.set(id, lyttPaa(
+        sb.channel("kanal-" + id, { config: { private: true } }),
+        nyttOmMelding));
+    }
   }
 
   /* Én endring i programmet kommer sjelden alene — drar du om på fem
@@ -540,11 +581,9 @@ const Api = (() => {
     if (reaSub && reaKanal === channelId) return;
     unsubscribeChannel();
     reaKanal = channelId;
-    reaSub = sb.channel("chat-" + channelId)
-      .on("postgres_changes",
-          { event: "*", schema: "public", table: "reactions", filter: `channel_id=eq.${channelId}` },
-          nyttOmReaksjon)
-      .subscribe();
+    reaSub = lyttPaa(
+      sb.channel("rea-" + channelId, { config: { private: true } }),
+      nyttOmReaksjon);
   }
 
   function unsubscribeChannel() {
@@ -559,6 +598,8 @@ const Api = (() => {
     clearTimeout(programTimer);
     unsubscribeChannel();
     if (liveSub) sb.removeChannel(liveSub);
+    for (const sub of kanalSubs.values()) sb.removeChannel(sub);
+    kanalSubs.clear();
     liveSub = null; liveTrip = null;
   }
 
@@ -1798,6 +1839,40 @@ const Api = (() => {
     if (sb) sb.auth.signOut().catch(() => {});
   }
 
+  /* Sletter kontoen helt. Serveren avgjør om det går — eier du en tur,
+     svarer den «eier_tur» og lar kontoen stå, for turen ville ellers
+     blitt stående uten noen som kan styre den.
+
+     Lokalt rydder vi bare når serveren sier at kontoen faktisk er borte.
+     Tømte vi først, ville en bruker som ikke fikk slettet seg stått igjen
+     utlogget og uten å vite hvorfor. */
+  async function slettKonto() {
+    const { data } = await sb.auth.getSession();
+    if (!data.session) return { slettet: false, grunn: "ikke_innlogget" };
+
+    let svar;
+    try {
+      const res = await fetch(CONFIG.supabaseUrl + "/functions/v1/slettkonto", {
+        method: "POST",
+        headers: {
+          "Authorization": "Bearer " + data.session.access_token,
+          "apikey": CONFIG.supabaseAnonKey,
+          "Content-Type": "application/json"
+        }
+      });
+      svar = await res.json();
+    } catch {
+      return { slettet: false, grunn: "nettverk" };
+    }
+
+    if (svar && svar.slettet) {
+      kobleFra();
+      Object.keys(localStorage).filter(k => k.startsWith("tk.")).forEach(k => localStorage.removeItem(k));
+      try { await sb.auth.signOut(); } catch {}
+    }
+    return svar || { slettet: false, grunn: "ukjent" };
+  }
+
   return {
     init, online, fmtDay,
     getProfile, setProfile, getLastTrip, setLastTrip, getLastChannel, setLastChannel,
@@ -1822,6 +1897,6 @@ const Api = (() => {
     erHer, ikkeHer,
     lastVarselvalg, varselvalg, varselNiva, settVarselNiva,
     lesInnlogging, erAnonym, minEpost, sendKode, bekreftKode, koblePaaEpost, bekreftKobling,
-    hentNavnFraTurer, loggUt
+    hentNavnFraTurer, loggUt, slettKonto
   };
 })();

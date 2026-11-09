@@ -1497,6 +1497,7 @@ const UI = (() => {
           ${trip.erEier || trip.erAdmin
             ? `<button class="listrow bar fare" data-deltrip="${esc(trip.id)}">Slett hele turen</button>` : ""}
           <button class="listrow bar fare" id="resetBtn">Logg ut på denne enheten</button>
+          <button class="listrow bar fare" id="slettKontoBtn">Slett kontoen min</button>
         </div></div>
       </div>`;
   }
@@ -1627,7 +1628,17 @@ const UI = (() => {
       $("composer").addEventListener("submit", onSend);
       for (const id of ["bildeInput", "kameraInput"]) {
         const felt = $(id);
-        if (felt) felt.addEventListener("change", velgBilde);
+        if (!felt) continue;
+        felt.addEventListener("change", velgBilde);
+        // I app-versjonen tar iOS over: vi stopper filvelgeren og åpner
+        // telefonens egen i stedet. Feltet blir stående i markeringen,
+        // så web-versjonen er uendret.
+        if (erNativ() && felt.parentElement) {
+          felt.parentElement.addEventListener("click", async ev => {
+            ev.preventDefault();
+            await velgBildeNativt(id === "kameraInput");
+          });
+        }
       }
       const bortVedlegg = $("fjernVedlegg");
       if (bortVedlegg) bortVedlegg.addEventListener("click", fjernVedlegg);
@@ -1878,16 +1889,58 @@ const UI = (() => {
      trykker send. Da rekker du å skrive noe til det, se at du valgte
      riktig bilde, eller ombestemme deg — i stedet for at et feiltrykk
      ryker ut til hele klassen. */
-  function velgBilde(e) {
-    const felt = e.target;
-    const fil = felt.files && felt.files[0];
-    felt.value = "";                       // samme bilde skal kunne velges igjen
+  /* Kjører appen som ekte iOS-app, legger Capacitor seg på window og
+     gir oss telefonens egne velgere. På web finnes det ikke, og da er
+     alt som før. Ingen import: appen har ikke noe byggesteg, og
+     Capacitor injiserer pluginene selv. */
+  const erNativ = () =>
+    Boolean(window.Capacitor && window.Capacitor.isNativePlatform &&
+            window.Capacitor.isNativePlatform());
+  const nativPlugin = navn =>
+    (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins[navn]) || null;
+
+  function settVedlegg(fil) {
     if (!fil || !S.openChat) return;
     if (S.vedlegg) URL.revokeObjectURL(S.vedlegg.url);
     S.vedlegg = { fil, url: URL.createObjectURL(fil) };
     render();
     const inn = $("msgInput");
     if (inn) inn.focus();
+  }
+
+  function velgBilde(e) {
+    const felt = e.target;
+    const fil = felt.files && felt.files[0];
+    felt.value = "";                       // samme bilde skal kunne velges igjen
+    settVedlegg(fil);
+  }
+
+  /* iOS' egen bildevelger i stedet for nettleserens filvelger. Apple
+     regner nettleserfelt som et tegn på at appen bare er en nettside i
+     en ramme (retningslinje 4.2), og telefonens egen velger er dessuten
+     den brukerne kjenner. */
+  async function velgBildeNativt(fraKamera) {
+    const Camera = nativPlugin("Camera");
+    if (!Camera) return false;
+    try {
+      const foto = await Camera.getPhoto({
+        quality: 85,
+        resultType: "base64",
+        source: fraKamera ? "CAMERA" : "PHOTOS",
+        // Appen krymper bildet selv i lastOppBilde(). Lar vi iOS beskjære
+        // det først, mister folk kantene av bildet uten å ha bedt om det.
+        allowEditing: false
+      });
+      if (!foto || !foto.base64String) return true;   // avbrutt
+      const bin = atob(foto.base64String);
+      const buf = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+      const type = "image/" + (foto.format === "png" ? "png" : "jpeg");
+      settVedlegg(new File([buf], "bilde." + (foto.format || "jpg"), { type }));
+    } catch {
+      // Avbryter man velgeren, kaster plugin-en. Det er ikke en feil.
+    }
+    return true;
   }
 
   function fjernVedlegg() {
@@ -1995,12 +2048,45 @@ const UI = (() => {
     } catch { return null; }
   }
 
+  /* Delemenyen i app-versjonen. Share-plugin-en vil ha en fil på disk,
+     ikke en blob i minnet, så bildet skrives til hurtiglageret først.
+     iOS rydder det selv.
+
+     Returnerer false hvis noe mangler, så den som kalte kan falle
+     tilbake til nedlasting — en knapp som ikke gjør noe er verre enn en
+     knapp som gjør det nest beste. */
+  async function delNativt(fil) {
+    const Fs = nativPlugin("Filesystem"), Share = nativPlugin("Share");
+    if (!Fs || !Share) return false;
+    try {
+      const b64 = await new Promise((ok, nei) => {
+        const l = new FileReader();
+        l.onload = () => ok(String(l.result).split(",")[1]);
+        l.onerror = nei;
+        l.readAsDataURL(fil);
+      });
+      const navn = `tripmate-${Date.now()}.jpg`;
+      await Fs.writeFile({ path: navn, data: b64, directory: "CACHE" });
+      const { uri } = await Fs.getUri({ path: navn, directory: "CACHE" });
+      await Share.share({ files: [uri] });
+      return true;
+    } catch {
+      // Avbrutt deling kaster også. Da er vi ferdige uansett — en
+      // nedlasting etterpå ville kommet som en overraskelse.
+      return true;
+    }
+  }
+
   /* «Lagre på kamerarull» finnes ikke som noe nettsider får lov til. Det
      nærmeste er delemenyen, der iPhone selv tilbyr «Lagre bilde». Har
      telefonen ikke den, laster vi ned fila i stedet. */
   async function lagreBilde(sti) {
     const fil = bildefiler.get(sti) || await forberedBlob(sti);
     if (!fil) return toast("Klarte ikke hente bildet.");
+
+    // I app-versjonen går bildet gjennom iOS' egen delemeny, der «Lagre
+    // bilde» ligger. navigator.share finnes ikke i en WKWebView.
+    if (erNativ() && await delNativt(fil)) return;
 
     if (navigator.canShare && navigator.canShare({ files: [fil] })) {
       try { await navigator.share({ files: [fil] }); return; }
@@ -4206,6 +4292,35 @@ const UI = (() => {
         await Api.signOutLocal();
         location.reload();
       }
+      return;
+    }
+
+    /* Sletting av konto spør to ganger. Første spørsmål sier hva som
+       skjer, andre er en siste stopp — dette kan ikke angres, og raden
+       ligger rett under «Logg ut», som folk trykker på i farta. */
+    if (t.id === "slettKontoBtn") {
+      const hva = Api.erAnonym()
+        ? "Slette kontoen? Du er gjest, så alt du har her forsvinner, og turkoden må brukes på nytt."
+        : "Slette kontoen? Du mistes fra alle turene dine, og e-posten din kan ikke logge inn igjen.";
+      if (!confirm(hva)) return;
+      if (!confirm("Helt sikker? Dette kan ikke angres.")) return;
+
+      const svar = await Api.slettKonto();
+
+      if (svar.slettet) { location.reload(); return; }
+
+      // Eier du turer, står kontoen. Vi sier hvilke, ellers er beskjeden
+      // umulig å gjøre noe med.
+      if (svar.grunn === "eier_tur") {
+        const navn = (svar.turer || []).map(t2 => t2.name).join(", ");
+        alert("Kontoen ble ikke slettet. Du eier " +
+          ((svar.turer || []).length === 1 ? "turen " : "turene ") + navn +
+          ". Slett dem, eller gjør noen andre til eier, og prøv igjen.");
+        return;
+      }
+      toast(svar.grunn === "nettverk"
+        ? "Fikk ikke kontakt. Prøv igjen."
+        : "Kontoen ble ikke slettet.");
       return;
     }
 

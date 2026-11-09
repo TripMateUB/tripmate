@@ -162,6 +162,38 @@ button,input,select,textarea{font:inherit;color:inherit}
   -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;
   -webkit-tap-highlight-color:transparent;touch-action:none;
 }
+/* Glass, der nettleseren kan lage det. Baren slipper gjennom det som
+   ligger under, så den leses som et lag over innholdet i stedet for et
+   felt ved siden av det — og programmet man blar forbi, synes at det er
+   der. Tett grunn står igjen som reserve over: en bar man ikke kan lese
+   teksten i, er verre enn en tett bar.
+
+   Ikke ekte Liquid Glass. Det bryter lyset og forvrenger det som ligger
+   bak, og det finnes bare som materiale i SwiftUI. Dette er frostet
+   glass: uskarphet, metning og en lyskant. */
+@supports ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))) {
+  .tabbar{
+    /* 0.72 er så langt ned gjennomsiktigheten kan gå før --ink-3 på de
+       uvalgte fanene faller under 4,5:1 mot det lyseste som kan ligge
+       bak. Senk den ikke uten å måle på nytt. */
+    background:color-mix(in srgb, var(--ground) 72%, transparent);
+    -webkit-backdrop-filter:blur(20px) saturate(180%);
+    backdrop-filter:blur(20px) saturate(180%);
+    /* Lyskanten øverst og skyggen nederst gir glasset tykkelse. Uten dem
+       ser det bare ut som en halvgjennomsiktig flate. */
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.65),
+      inset 0 -1px 0 rgba(16,53,65,.04),
+      0 1px 2px rgba(16,53,65,.05),
+      0 10px 26px -14px rgba(16,53,65,.45);
+    border-color:color-mix(in srgb, var(--line) 70%, transparent);
+  }
+  /* Pilla bak den valgte fanen må slippe gjennom litt av det samme, ellers
+     ligger det en tett flekk midt i glasset. */
+  .tabbar .pille{
+    background:color-mix(in srgb, var(--blue-soft) 82%, transparent);
+  }
+}
 /* Pilla bak den valgte fanen. Fire like brede faner, så den kan flyttes
    med rene prosenter — ingenting å måle, ingenting som kan bli feil. */
 .tabbar .pille{
