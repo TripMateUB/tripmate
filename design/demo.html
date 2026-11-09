@@ -123,7 +123,10 @@ function lagApi() {
   if (VALG.has("samtidig")) {
     const idag = days.find(x => x.date === new Date().toISOString().slice(0, 10));
     if (idag) {
-      const n = new Date(Date.now() - 5 * 60000);
+      // ?samtidig=1 lar to punkter paagaa naa. ?samtidig=2 lar dem begynne
+      // om en halvtime, saa bade «Naa» og «Naa snart» kan maales.
+      const forskyv = VALG.get("samtidig") === "2" ? 30 : -5;
+      const n = new Date(Date.now() + forskyv * 60000);
       const kl = String(n.getHours()).padStart(2, "0") + ":" + String(n.getMinutes()).padStart(2, "0");
       const lag = (id, tittel, sted) => ({
         id, t: kl, title: tittel, place: sted ? places[sted].id : null, note: null, src: null,
@@ -132,6 +135,11 @@ function lagApi() {
       idag.items.length = 0;                 // bare de to, saa sjekken er entydig
       idag.items.push(lag("s1", "Gruppe A — Eiffeltaarnet", "eiffel"));
       idag.items.push(lag("s2", "Gruppe B — Orsay", "orsay"));
+      // Overlapper de to over, men har ikke begynt enda: skal ikke staa
+      // under «Samtidig», for den er ikke samtidig med naa.
+      const senere = new Date(n.getTime() + 35 * 60000);
+      const klSenere = String(senere.getHours()).padStart(2, "0") + ":" + String(senere.getMinutes()).padStart(2, "0");
+      idag.items.push(Object.assign(lag("s3", "Gruppe C — har ikke startet", "sacre"), { t: klSenere }));
       idag.items.sort((a, b) => String(a.t).localeCompare(String(b.t)));
     }
   }

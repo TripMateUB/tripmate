@@ -485,7 +485,7 @@ const UI = (() => {
       // Skjer to ting på én gang, er ikke den ene mer «nå» enn den andre.
       // Kortet viste bare den første, og da sto halve dagen usynlig på
       // den skjermen folk faktisk ser om morgenen.
-      const ogsaa = samtidigeMed(ne.day, ne.item);
+      const ogsaa = samtidigeMed(ne.day, ne.item, naa, Boolean(ne.naa));
       kort = `<section class="naakort">
         <div class="merk"><i></i>${ne.naa ? "Nå" : ne.day.date === today() ? "Nå snart" : "Neste · " + esc(ne.day.label)}</div>
         <div class="kl">${ne.item.t ? esc(tidTekst(ne.item)) : "—"}</div>
@@ -592,14 +592,21 @@ const UI = (() => {
 
   /* De andre punktene som deler tid med dette ene. «samtidige» svarer
      for hele dagen; her trengs naboene til ett punkt. */
-  function samtidigeMed(dag, i) {
+  function samtidigeMed(dag, i, naa, paagaar) {
     if (!i.t) return [];
-    const a0 = minutt(i.t), a1 = a0 + (i.minutter || 0);
-    return dag.items.filter(x => {
-      if (x.id === i.id || !x.t) return false;
-      const b0 = minutt(x.t), b1 = b0 + (x.minutter || 0);
-      return b0 === a0 || (a0 < b1 && b0 < a1);
-    });
+    if (paagaar) {
+      // Kortet handler om dette oeyeblikket. Da er «samtidig» det som
+      // faktisk kjoerer naa — ikke noe som overlapper, men ikke har
+      // begynt. Et punkt uten varighet er et tidspunkt og paagaar aldri.
+      return dag.items.filter(x => {
+        if (x.id === i.id || !x.t || x.t > naa) return false;
+        const s = slutt(x);
+        return Boolean(s) && s > naa;
+      });
+    }
+    // Ingenting paagaar: da er «samtidig» det som begynner i samme
+    // oeyeblikk som det neste — to grupper som gaar hver sin vei 09:30.
+    return dag.items.filter(x => x.id !== i.id && x.t && x.t === i.t);
   }
 
   /* Hvilke punkter deler tid med et annet. To uten varighet teller som

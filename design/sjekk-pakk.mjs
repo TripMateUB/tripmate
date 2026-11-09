@@ -285,8 +285,14 @@ for (const [flagg, venta] of [["", /står fortsatt uten posisjon/], ["&vaerfeil=
   await s4.goto(`http://localhost:${process.env.PORT || 4321}/design/demo.html?samtidig=1`, { waitUntil: "networkidle" });
   await s4.waitForSelector("#tabbar button");
   await s4.waitForTimeout(600);
+  await sjekk("kortet staar paa Naa", async () =>
+    /^Nå$/.test((await s4.$eval(".naakort .merk", e => e.textContent)).trim()));
   await sjekk("naa-kortet viser det andre punktet som skjer samtidig", async () =>
     (await s4.$$eval(".ogsaarad", e => e.length)) === 1);
+  await sjekk("et punkt som overlapper, men ikke har startet, staar ikke under Samtidig", async () =>
+    !/har ikke startet/.test(await s4.$eval(".naakort", e => e.textContent)));
+  await sjekk("det punktet ligger under Senere i dag i stedet", async () =>
+    (await s4.$$eval(".post", e => e.map(x => x.textContent))).some(t => /har ikke startet/.test(t)));
   await sjekk("den samtidige raden har bade tid, tittel og sted", async () => {
     const t = await s4.$eval(".ogsaarad", e => e.textContent.replace(/\s+/g, " "));
     return /\d\d:\d\d/.test(t) && /Gruppe B/.test(t) && /Orsay/.test(t);
@@ -299,6 +305,24 @@ for (const [flagg, venta] of [["", /står fortsatt uten posisjon/], ["&vaerfeil=
     return /Gruppe B/.test(await s4.$eval("#sheet", e => e.textContent));
   });
   await s4.close();
+}
+
+/* Naar ingenting paagaar, er «samtidig» det som begynner i samme
+   oeyeblikk som det neste. */
+{
+  const s5 = await (await nb.newContext({ ...devices["iPhone 13"] })).newPage();
+  s5.on("pageerror", e => feil.push("pageerror (samtidig 2): " + e));
+  await s5.goto(`http://localhost:${process.env.PORT || 4321}/design/demo.html?samtidig=2`, { waitUntil: "networkidle" });
+  await s5.waitForSelector("#tabbar button");
+  await s5.waitForTimeout(600);
+  await sjekk("kortet staar paa Naa snart", async () =>
+    /Nå snart/.test(await s5.$eval(".naakort .merk", e => e.textContent)));
+  await sjekk("det som begynner samtidig med det neste vises", async () =>
+    (await s5.$$eval(".ogsaarad", e => e.length)) === 1 &&
+    /Gruppe B/.test(await s5.$eval(".ogsaarad", e => e.textContent)));
+  await sjekk("et punkt som begynner senere vises ikke", async () =>
+    !/har ikke startet/.test(await s5.$eval(".naakort", e => e.textContent)));
+  await s5.close();
 }
 console.log("OK:\n  " + ok.join("\n  "));
 console.log(nei.length ? "\nFEIL:\n  " + nei.join("\n  ") : "\nFEIL: ingen");
