@@ -100,7 +100,9 @@ function lagApi() {
   Object.entries(tpl.places).forEach(([navn, p], i) => {
     places[navn] = {
       id: "sted" + i, name: p.name, addr: p.addr, kind: p.kind, url: "",
-      lat: p.lat == null ? null : p.lat, lon: p.lon == null ? null : p.lon,
+      // ?utenpos=1 lar sjekkene se «Maa ordnes» og knappen som slaar opp paa nytt.
+      lat: VALG.has("utenpos") ? null : (p.lat == null ? null : p.lat),
+      lon: VALG.has("utenpos") ? null : (p.lon == null ? null : p.lon),
       ignorer: false, alias: [p.name.toLowerCase()]
     };
   });
@@ -195,7 +197,8 @@ function lagApi() {
     lastReaksjoner: lover(undefined),
     vaerFor: () => null,
     vaerPunkt: () => null,
-    lastVaer: ingen,
+    lastVaer: () => new Promise(r => setTimeout(() =>
+      r(VALG.has("vaerfeil") ? { ok: false, grunn: "Fikk ikke lest stedene." } : { ok: true, uten: 0, bygg: 3 }), 700)),
     lastOppBilde: lover(null),
     bildeUrl: () => null,
     bildeAdresse: () => null,

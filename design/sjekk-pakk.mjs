@@ -250,6 +250,33 @@ await sjekk("draing flytter punktet oppover", async () =>
   etterDra[2] === foerDra[3] && etterDra[3] === foerDra[2] && etterDra.length === foerDra.length);
 await sjekk("ingen punkter kom bort under draingen", async () =>
   foerDra.every(t => etterDra.includes(t)));
+
+/* Knappen som slår opp adressene på nytt. Oppslaget tar over tjue
+   sekunder på ekte, så den må si at den holder på — og den må si fra
+   når serveren svarer nei, i stedet for å bli stille. */
+for (const [flagg, venta] of [["", /står fortsatt uten posisjon/], ["&vaerfeil=1", /Fikk ikke lest stedene/]]) {
+  const s3 = await (await nb.newContext({ ...devices["iPhone 13"] })).newPage();
+  s3.on("pageerror", e => feil.push("pageerror (vær): " + e));
+  await s3.goto(`http://localhost:${process.env.PORT || 4321}/design/demo.html?utenpos=1${flagg}`, { waitUntil: "networkidle" });
+  await s3.waitForSelector("#tabbar button");
+  await s3.evaluate(() => document.querySelector('#tabbar button[data-tab="meg"]').click());
+  await s3.waitForTimeout(500);
+  const merke = flagg ? "når serveren sier nei" : "når alt gikk bra";
+  await sjekk(`knappen «Slå opp adressene på nytt» finnes ${merke}`,
+    async () => await s3.$("[data-vaerigjen]") !== null);
+  await s3.evaluate(() => document.querySelector("[data-vaerigjen]").click());
+  await s3.waitForTimeout(250);
+  await sjekk(`den sier at den holder på ${merke}`, async () =>
+    /Slår opp adressene/.test(await s3.$$eval("#screen p.muted", e => e.map(x => x.textContent).join(" "))));
+  await sjekk(`knappen kan ikke trykkes to ganger ${merke}`,
+    async () => await s3.$("[data-vaerigjen]") === null);
+  await s3.waitForTimeout(1500);
+  await sjekk(`svaret kommer fram ${merke}`, async () =>
+    venta.test(await s3.$eval("#toast, .toast", e => e.textContent)));
+  await sjekk(`knappen er tilbake etterpå ${merke}`,
+    async () => await s3.$("[data-vaerigjen]") !== null);
+  await s3.close();
+}
 console.log("OK:\n  " + ok.join("\n  "));
 console.log(nei.length ? "\nFEIL:\n  " + nei.join("\n  ") : "\nFEIL: ingen");
 console.log(feil.length ? "KONSOLL:\n  " + feil.join("\n  ") : "KONSOLL: rent");

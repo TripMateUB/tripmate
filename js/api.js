@@ -614,7 +614,7 @@ const Api = (() => {
   async function varsleOmMelding(messageId) {
     try {
       const { data } = await sb.auth.getSession();
-      if (!data.session) return;
+      if (!data.session) return { ok: false, grunn: "Du er ikke innlogget." };
       await fetch(CONFIG.supabaseUrl + "/functions/v1/varsle", {
         method: "POST",
         keepalive: true,             // rekker fram selv om du lukker appen
@@ -1475,8 +1475,11 @@ const Api = (() => {
      derfor en halvtime, og hentes før det bare når et sted er endret. */
   const VAER_FERSK_MIN = 30;
 
+  /* Svarer med hva som faktisk skjedde. Bakgrunnskallene bryr seg ikke,
+     men knappen «Slå opp adressene på nytt» gjør det: uten et svar kunne
+     den bare si «ferdig», også når serveren hadde sagt nei. */
   async function lastVaer(tripId, tving) {
-    if (!online()) return;
+    if (!online()) return { ok: false, grunn: "Du er uten nett." };
 
     const lagret = lsGet(LS.vaer(tripId), null);
     if (lagret && lagret.vaer && !Object.keys(cache.vaer).length) {
@@ -1485,7 +1488,7 @@ const Api = (() => {
     }
     const alder = lagret && lagret.ts ? (Date.now() - lagret.ts) / 60000 : Infinity;
     if (!tving && !cache.vaerUtdatert && alder < VAER_FERSK_MIN &&
-        lagret && lagret.vaer && Object.keys(lagret.vaer).length) return;
+        lagret && lagret.vaer && Object.keys(lagret.vaer).length) return { ok: true, hoppet: true };
 
     try {
       const { data } = await sb.auth.getSession();
@@ -1499,13 +1502,22 @@ const Api = (() => {
         },
         body: JSON.stringify({ tripId })
       });
-      if (!res.ok) return;
+      if (!res.ok) {
+        // Teksten fra serveren er mer presis enn «noe gikk galt».
+        let hvorfor = "Serveren svarte " + res.status + ".";
+        try { const f = await res.json(); if (f && f.feil) hvorfor = f.feil; } catch {}
+        return { ok: false, grunn: hvorfor };
+      }
       const svar = await res.json();
       cache.vaer = svar.vaer || {};
       cache.vaerUtdatert = false;
       lsSet(LS.vaer(tripId), { ts: Date.now(), vaer: cache.vaer });
       fire();
-    } catch { /* uten vær går appen like fint */ }
+      return { ok: true, uten: svar.uten, bygg: svar.bygg };
+    } catch (e) {
+      // Uten vær går appen like fint — men den som trykket skal få vite det.
+      return { ok: false, grunn: "Fikk ikke svar fra serveren." };
+    }
   }
 
   /* Nærmeste times varsel for et sted på et gitt tidspunkt. */

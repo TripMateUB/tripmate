@@ -11,6 +11,7 @@ const UI = (() => {
     nye: 0, sistAntall: 0, beholdSkroll: null, sveiper: false,
     side: null, varselStatus: null, varselEnheter: null, varselTest: null,
     folk: null, folkFeil: false, sisteVisning: null,
+    vaerJobber: false,
     pakk: null, pakkFeil: false, setekart: null, seteFeil: false,
     megTall: null,                          // tallene som står til høyre i Meg
     sideChat: null, chatFolk: null, ventende: 0, vedlegg: null, sender: false, sisteComposer: null };
@@ -1350,7 +1351,9 @@ const UI = (() => {
             </div>`).join("")}</div>
           </div>
           ${o.some(x => /Fant ikke posisjonen/.test(x.hva))
-            ? `<button class="linkbtn" style="font-size:13px" data-vaerigjen="1">Slå opp adressene på nytt</button>`
+            ? S.vaerJobber
+              ? `<p class="muted" style="margin:10px 0 0;font-size:13px">${prikker()} Slår opp adressene. Dette tar et halvt minutt — kartet tåler ett spørsmål i sekundet.</p>`
+              : `<button class="linkbtn" style="font-size:13px" data-vaerigjen="1">Slå opp adressene på nytt</button>`
             : ""}
           ${skjultLenke}
         </div>`;
@@ -3980,14 +3983,19 @@ const UI = (() => {
     // treffe i dag. Uten denne knappen var eneste vei å endre adressen
     // til noe annet og tilbake igjen.
     if (t.hasAttribute("data-vaerigjen")) {
-      toast("Slår opp adressene…");
-      try {
-        await Api.lastVaer(S.trip.id, true);
-        await openTrip(S.trip.id);
-        S.tab = "meg"; render();
-        const igjen = oppgaver().filter(o => /Fant ikke posisjonen/.test(o.hva)).length;
-        toast(igjen ? `${igjen} står fortsatt uten posisjon.` : "Alle stedene har posisjon nå.");
-      } catch { toast("Klarte ikke slå opp. Sjekk nettet."); }
+      // Oppslaget tar over tjue sekunder: kartet tåler ett spørsmål i
+      // sekundet, og vi spør om flere steder. Et varsel som forsvinner
+      // etter tre sekunder er da verre enn ingenting — derfor blir
+      // knappen stående og si at den holder på.
+      if (S.vaerJobber) return;
+      S.vaerJobber = true; render();
+      const svar = await Api.lastVaer(S.trip.id, true);
+      S.vaerJobber = false;
+      try { await openTrip(S.trip.id); } catch {}
+      S.tab = "meg"; render();
+      if (svar && svar.ok === false) return toast(svar.grunn);
+      const igjen = oppgaver().filter(o => /Fant ikke posisjonen/.test(o.hva)).length;
+      toast(igjen ? `${igjen} står fortsatt uten posisjon.` : "Alle stedene har posisjon nå.");
       return;
     }
     // Kommer du fra et ark eller fra programmet, må arket lukkes og
