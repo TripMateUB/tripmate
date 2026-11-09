@@ -168,6 +168,8 @@ const Api = (() => {
     if (m.includes("eier_kan_ikke_fjernes")) return k("Den som laget turen kan ikke fjernes.");
     if (m.includes("kan_ikke_endres")) return k("Denne deltakeren kan ikke endres herfra.");
     if (m.includes("fullt")) return k("Det er fullt — alle plassene er tatt.");
+    if (m.includes("bare_ledere")) return k("Bare reiseledere kan skrive i denne chatten.");
+    if (m.includes("privat_chat")) return k("En privat chat kan ikke være oppslagstavle.");
     if (m.includes("sete_tatt")) return k("Den plassen ble tatt av noen andre.");
     if (m.includes("ugyldig_sete")) return k("Det setet finnes ikke.");
     if (m.includes("ikke_paamelding")) return k("Dette punktet har ikke påmelding.");
@@ -261,7 +263,6 @@ const Api = (() => {
     return {
       id: trip.id, code: trip.code, name: trip.name, org: trip.org,
       krevGodkjenning: trip.require_approval === true,
-      seter: trip.seter == null ? null : trip.seter,
       bilder: trip.bilder !== false,
       venter: member ? member.status === "pending" : false,
       dates: days.length ? datoSpenn(days[0].date, days[days.length - 1].date) : "",
@@ -283,6 +284,7 @@ const Api = (() => {
       }, fmtDay(d.date))),
       channels: channels.map(c => ({
         id: c.id, name: c.name, sub: c.sub, private: c.private === true,
+        bareLedere: c.bare_ledere === true,   // oppslagstavle, ikke samtale
         min: c.created_by === userId          // du laget den, og kan slette den
       }))
     };
@@ -1009,6 +1011,16 @@ const Api = (() => {
     if (c) c.name = String(navn).trim().slice(0, 60);
   }
 
+  /* En chat kan være en oppslagstavle: alle leser, bare reiseledere
+     skriver. Regelen står i basen også — ellers kunne en deltaker
+     skrevet rett inn uten å gå via appen. */
+  async function settChatSkriving(channelId, bareLedere) {
+    const { error } = await sb.rpc("sett_chat_skriving", { p_channel: channelId, p_bare_ledere: bareLedere });
+    if (error) throw friendly(error);
+    const c = cache.trip && cache.trip.channels.find(x => x.id === channelId);
+    if (c) c.bareLedere = bareLedere;
+  }
+
   /* ───────── chatter ───────── */
   async function addChannel(tripId, name, sub, isPrivate, memberIds) {
     const { data, error } = await sb.rpc("create_channel", {
@@ -1017,7 +1029,7 @@ const Api = (() => {
     });
     if (error) throw friendly(error);
     const c = Array.isArray(data) ? data[0] : data;
-    if (cache.trip) cache.trip.channels.push({ id: c.id, name: c.name, sub: c.sub, private: c.private });
+    if (cache.trip) cache.trip.channels.push({ id: c.id, name: c.name, sub: c.sub, private: c.private, bareLedere: false });
     return c.id;
   }
 
@@ -1170,56 +1182,114 @@ const Api = (() => {
      Begge hentes når siden åpnes, ikke ved oppstart. De hører til et
      sted man går inn i, og skal ikke koste noe for dem som aldri gjør
      det. Tallene til «Meg» er tre tellinger, ikke tre lister. */
+  /* Lista har to deler. Reiselederens del er felles — alle ser de samme
+     punktene, og krysser av for seg selv. Din egen del er din alene, og
+     ligger i en annen tabell fordi den ikke skal kunne leses av andre
+     i det hele tatt, ikke engang ved et uhell. */
   async function pakkeliste(tripId) {
-    const [punkter, kryss] = await Promise.all([
+    const [punkter, kryss, egne] = await Promise.all([
       sb.from("pakk").select("id, txt, sort").eq("trip_id", tripId).order("sort"),
-      sb.from("pakk_kryss").select("pakk_id")
+      sb.from("pakk_kryss").select("pakk_id"),
+      sb.from("pakk_egen").select("id, txt, sort, kryss").eq("trip_id", tripId).order("sort")
     ]);
     if (punkter.error) throw friendly(punkter.error);
+    if (egne.error) throw friendly(egne.error);
     // Radsikkerheten gjør at kryssene du får er dine egne, ingen andres.
     const mine = new Set((kryss.data || []).map(r => r.pakk_id));
-    return (punkter.data || []).map(p => ({ id: p.id, txt: p.txt, sort: p.sort, kryss: mine.has(p.id) }));
+    return {
+      felles: (punkter.data || []).map(p => ({ id: p.id, txt: p.txt, sort: p.sort, kryss: mine.has(p.id) })),
+      egne: (egne.data || []).map(p => ({ id: p.id, txt: p.txt, sort: p.sort, kryss: p.kryss === true }))
+    };
   }
 
-  async function kryssPakk(pakkId, paa) {
+  async function kryssPakk(pakkId, paa, egen) {
+    if (egen) {
+      const { error } = await sb.from("pakk_egen").update({ kryss: paa }).eq("id", pakkId);
+      if (error) throw friendly(error);
+      return;
+    }
     const { error } = paa
       ? await sb.from("pakk_kryss").insert({ pakk_id: pakkId, user_id: userId })
       : await sb.from("pakk_kryss").delete().eq("pakk_id", pakkId).eq("user_id", userId);
     if (error) throw friendly(error);
   }
 
-  async function nyttPakkPunkt(tripId, txt, sort) {
-    const { error } = await sb.from("pakk").insert({ trip_id: tripId, txt, sort });
+  async function nyttPakkPunkt(tripId, txt, sort, egen) {
+    const { error } = egen
+      ? await sb.from("pakk_egen").insert({ trip_id: tripId, user_id: userId, txt, sort })
+      : await sb.from("pakk").insert({ trip_id: tripId, txt, sort });
     if (error) throw friendly(error);
   }
 
-  async function slettPakkPunkt(id) {
-    const { error } = await sb.from("pakk").delete().eq("id", id);
+  async function slettPakkPunkt(id, egen) {
+    const { error } = await sb.from(egen ? "pakk_egen" : "pakk").delete().eq("id", id);
     if (error) throw friendly(error);
   }
 
-  /* Hvem som sitter hvor. Navn henter vi ikke: kartet skal vise ledig,
-     tatt og din egen plass, og det er det det brukes til. */
-  async function seter(tripId) {
-    const { data, error } = await sb.from("seter").select("nr, user_id").eq("trip_id", tripId);
-    if (error) throw friendly(error);
-    return (data || []).map(r => ({ nr: r.nr, meg: r.user_id === userId }));
+  /* Rekkefølgen lagres som 10, 20, 30 … slik programpunktene gjør det:
+     da er det plass til å skyte inn et punkt uten å skrive om alt. */
+  async function pakkRekkefolge(ider, egen) {
+    const tabell = egen ? "pakk_egen" : "pakk";
+    for (let n = 0; n < ider.length; n++) {
+      const { error } = await sb.from(tabell).update({ sort: (n + 1) * 10 }).eq("id", ider[n]);
+      if (error) throw friendly(error);
+    }
+  }
+
+  /* Én tur kan ha flere kjøretøy: to busser, et fly ned og et tog
+     tilbake. Hvert av dem har sitt eget kart, og du har én plass i
+     hvert. Derfor hentes kjøretøyene og setene sammen — kartet er
+     ingenting uten oppsettet, og oppsettet er tomt uten setene. */
+  async function setekart(tripId) {
+    const [kj, st, folk] = await Promise.all([
+      sb.from("kjoretoy").select("id, navn, typ, plasser, sort").eq("trip_id", tripId).order("sort"),
+      sb.from("seter").select("kjoretoy_id, nr, user_id").eq("trip_id", tripId),
+      sb.from("members").select("user_id, name").eq("trip_id", tripId)
+    ]);
+    if (kj.error) throw friendly(kj.error);
+    if (st.error) throw friendly(st.error);
+    // Et setekart uten navn svarer ikke på spørsmålet man stiller det:
+    // ikke «er den ledig», men «hvor sitter de jeg skal sitte med».
+    const navn = new Map((folk.data || []).map(m => [m.user_id, m.name]));
+    const tatt = st.data || [];
+    return (kj.data || []).map(k => ({
+      id: k.id, navn: k.navn, typ: k.typ, plasser: k.plasser, sort: k.sort,
+      seter: tatt.filter(s => s.kjoretoy_id === k.id).map(s => ({
+        nr: s.nr, meg: s.user_id === userId,
+        hvem: navn.get(s.user_id) || "Ukjent"
+      }))
+    }));
   }
 
   /* Gjennom basen, ikke gjennom appen: to som trykker på samme sete
      innenfor samme sekund skal ikke begge få det. */
-  async function taSete(tripId, nr) {
-    const { error } = await sb.rpc("ta_sete", { p_trip: tripId, p_nr: nr });
+  async function taSete(kjoretoyId, nr) {
+    const { error } = await sb.rpc("ta_sete", { p_kjoretoy: kjoretoyId, p_nr: nr });
     if (error) throw friendly(error);
   }
 
-  async function slippSete(tripId) {
-    const { error } = await sb.from("seter").delete().eq("trip_id", tripId).eq("user_id", userId);
+  async function slippSete(kjoretoyId) {
+    const { error } = await sb.from("seter")
+      .delete().eq("kjoretoy_id", kjoretoyId).eq("user_id", userId);
     if (error) throw friendly(error);
   }
 
-  async function settSeteantall(tripId, antall) {
-    const { error } = await sb.from("trips").update({ seter: antall }).eq("id", tripId);
+  async function nyttKjoretoy(tripId, { navn, typ, plasser }) {
+    const { data, error } = await sb.from("kjoretoy")
+      .insert({ trip_id: tripId, navn, typ, plasser, sort: Date.now() % 2147483647 })
+      .select("id").single();
+    if (error) throw friendly(error);
+    return data.id;
+  }
+
+  async function endreKjoretoy(id, { navn, typ, plasser }) {
+    const { error } = await sb.from("kjoretoy").update({ navn, typ, plasser }).eq("id", id);
+    if (error) throw friendly(error);
+  }
+
+  /* Setene følger kjøretøyet ut; det er på plass i basen, ikke her. */
+  async function slettKjoretoy(id) {
+    const { error } = await sb.from("kjoretoy").delete().eq("id", id);
     if (error) throw friendly(error);
   }
 
@@ -1227,16 +1297,22 @@ const Api = (() => {
      finnes ennå — skal fana vise seg likevel, bare uten tall. */
   async function megTall(tripId) {
     if (!online()) return null;
-    const [p, k, s2] = await Promise.all([
+    const [p, k, e, s2] = await Promise.all([
       sb.from("pakk").select("id", { count: "exact", head: true }).eq("trip_id", tripId),
       sb.from("pakk_kryss").select("pakk_id, pakk!inner(trip_id)", { count: "exact", head: true })
         .eq("pakk.trip_id", tripId),
-      sb.from("seter").select("nr").eq("trip_id", tripId).eq("user_id", userId).maybeSingle()
-    ]);
+      sb.from("pakk_egen").select("kryss").eq("trip_id", tripId),
+      sb.from("kjoretoy").select("id").eq("trip_id", tripId)
+    ].map(q => q.then(r => r, () => ({ data: [], count: 0 }))));
+    const mine = s2.data && s2.data.length
+      ? await sb.from("seter").select("kjoretoy_id").eq("trip_id", tripId).eq("user_id", userId)
+      : { data: [] };
+    const egne = e.data || [];
     return {
-      pakkTotalt: p.count || 0,
-      pakkKrysset: k.count || 0,
-      mittSete: s2.data ? s2.data.nr : null
+      pakkTotalt: (p.count || 0) + egne.length,
+      pakkKrysset: (k.count || 0) + egne.filter(x => x.kryss).length,
+      kjoretoy: (s2.data || []).length,
+      mineSeter: (mine.data || []).length
     };
   }
 
@@ -1610,12 +1686,12 @@ const Api = (() => {
     sendMessage, deleteMessage, onChange,
     reactions, toggleReaction, lastReaksjoner, vaerFor, vaerPunkt, lastVaer,
     lastOppBilde, bildeUrl, bildeAdresse, slettBilde, slettTekst, ryddGamleBilder, setBilderPaa,
-    addChannel, deleteChannel, tripMembers, channelMembers, addChannelMember, removeChannelMember, setMemberRole,
+    addChannel, deleteChannel, settChatSkriving, tripMembers, channelMembers, addChannelMember, removeChannelMember, setMemberRole,
     setKrevGodkjenning, godkjennDeltaker, avvisDeltaker, fjernDeltaker,
     addPlace, updatePlace, setIgnorer, addDay, setHotel, addItem, updateItem, deleteItem, deleteDay,
     lastPaameldinger, paameldte, meldPaa, meldAv,
-    pakkeliste, kryssPakk, nyttPakkPunkt, slettPakkPunkt,
-    seter, taSete, slippSete, settSeteantall, megTall,
+    pakkeliste, kryssPakk, nyttPakkPunkt, slettPakkPunkt, pakkRekkefolge,
+    setekart, taSete, slippSete, nyttKjoretoy, endreKjoretoy, slettKjoretoy, megTall,
     applyTemplate, lesProgramFraPdf, signOutLocal,
     varselStatus, slaaPaaVarsler, slaaAvVarsler, varselEnheter, testVarsel, varmVarsler,
     erHer, ikkeHer,

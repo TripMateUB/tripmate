@@ -81,7 +81,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 /* En tekstlenke er rundt 19 px høy, og det er for lite å treffe på.
    Trykkflaten strekkes med polstring og trekkes inn igjen med like
    stor negativ marg, så ingenting flytter seg. */
-.linkbtn{background:none;border:0;padding:15px 5px;margin:0 -5px;color:var(--blue);font-weight:600;cursor:pointer;text-decoration:underline;font-size:inherit}
+.linkbtn{background:none;border:0;padding:15px 8px;margin:0 -8px;min-width:44px;color:var(--blue);font-weight:600;cursor:pointer;text-decoration:underline;font-size:inherit}
 
 /* ---------- join ---------- */
 .join{height:100%;overflow-y:auto;overscroll-behavior:contain;display:grid;place-items:center;padding:28px 20px calc(28px + var(--safe-b));background:var(--ground)}
@@ -422,7 +422,8 @@ input[type="time"],input[type="date"]{width:100%;max-width:100%;min-width:0}
   padding:12px;cursor:pointer;background:var(--surface)}
 .pick input{margin-top:3px;flex:none;width:18px;height:18px;accent-color:var(--blue)}
 .pick span{font-size:14.5px;line-height:1.35}
-.pick small{color:var(--ink-3);font-size:12.5px}
+/* .pick har egen flatefarge, og der holder ikke --ink-3 kravet paa 4,5:1. */
+.pick small{color:var(--ink-2);font-size:12.5px}
 .pick:has(input:checked){border-color:var(--blue);background:var(--blue-soft)}
 
 .offlinebar{background:var(--amber-soft);color:var(--ink);font-size:13px;padding:9px 16px;
@@ -488,7 +489,7 @@ label.person span{flex:1;min-width:0}
   padding:calc(9px + env(safe-area-inset-top,0px)) 10px 9px 6px;border-bottom:1px solid var(--line-soft);background:var(--surface);
 }
 .convhead .back{
-  width:40px;height:40px;border:0;background:none;cursor:pointer;display:grid;place-items:center;
+  width:44px;height:44px;border:0;background:none;cursor:pointer;display:grid;place-items:center;
   border-radius:50%;color:var(--ink);flex:none;
 }
 .convhead .back svg{width:23px;height:23px;stroke:currentColor;fill:none;stroke-width:2.1;stroke-linecap:round;stroke-linejoin:round}
@@ -497,7 +498,7 @@ label.person span{flex:1;min-width:0}
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .convhead .t small{display:block;font-size:11.5px;color:var(--ink-3)}
 .convhead .who{border:1px solid var(--line);background:var(--surface);border-radius:9px;
-  font-family:"DM Sans",sans-serif;font-weight:600;font-size:12px;padding:8px 11px;cursor:pointer;flex:none;min-height:40px}
+  font-family:"DM Sans",sans-serif;font-weight:600;font-size:12px;padding:8px 11px;cursor:pointer;flex:none;min-height:44px}
 
 /* Ark kan dras ned for å lukkes. */
 .sheet{touch-action:pan-y;will-change:transform;
@@ -546,7 +547,7 @@ label.person span{flex:1;min-width:0}
 .redigerrad{display:flex;gap:7px;margin-top:8px}
 .minibtn{
   border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer;
-  border-radius:9px;min-width:40px;min-height:36px;padding:4px 11px;
+  border-radius:9px;min-width:44px;min-height:44px;padding:4px 11px;
   font-family:"DM Sans",sans-serif;font-weight:600;font-size:13px;
 }
 .minibtn:disabled{opacity:.35;cursor:default}
@@ -1092,26 +1093,31 @@ label.person span{flex:1;min-width:0}
 /* ───────── pakkeliste ─────────
    Krysset er ditt eget, og skal se ut som en avkryssing — ikke som en
    bryter. En ring som fylles, slik lister gjør det på telefonen. */
-.pkrad{display:flex;align-items:center;gap:12px;padding:9px 13px;min-height:48px;position:relative}
-.pkrad + .pkrad::before{content:"";position:absolute;left:51px;right:0;top:0;height:1px;background:var(--line-soft)}
-.pkhake{width:26px;height:26px;border-radius:50%;flex:none;border:1.5px solid var(--line);
-  background:none;padding:0;display:grid;place-items:center;color:var(--on-blue);cursor:pointer;
+.pkrad{display:flex;align-items:center;gap:4px;padding:9px 6px 9px 13px;min-height:48px;position:relative}
+.pkrad + .pkrad::before{content:"";position:absolute;left:60px;right:0;top:0;height:1px;background:var(--line-soft)}
+.pkhake{width:44px;height:44px;flex:none;border:0;background:none;padding:0;cursor:pointer;
+  display:grid;place-items:center;margin:0 -9px;color:var(--on-blue)}
+.pkhake::before{content:"";grid-area:1/1;width:26px;height:26px;border-radius:50%;
+  border:1.5px solid var(--line);box-sizing:border-box;
   transition:background var(--t-trykk) linear, border-color var(--t-trykk) linear}
-.pkhake.av{background:var(--blue);border-color:var(--blue)}
-.pkhake svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2.4;
+.pkhake.av::before{background:var(--blue);border-color:var(--blue)}
+.pkhake svg{grid-area:1/1;width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2.4;
   stroke-linecap:round;stroke-linejoin:round}
 .pknavn{flex:1;min-width:0;font-size:15.5px}
+/* Slettekrysset skal naas, ikke ses. Rammen gjorde det til hovedsaken i
+   raden, foran det punktet faktisk sier. */
+.pkrad .minibtn{border:0;background:none;min-width:44px;padding:0;font-size:16px}
 .pknavn.av{color:var(--ink-3);text-decoration:line-through}
 
 /* ───────── setekart ─────────
    Fire i bredden med gangen i midten, slik en buss står. Kolonne tre er
    gangen, så hvert tredje sete settes over den. */
-.setekart{display:grid;grid-template-columns:repeat(2,1fr) 18px repeat(2,1fr);gap:8px}
-.setekart .setet:nth-child(4n+3){grid-column:4}
-.setet{padding:11px 4px;min-height:46px;border:1px solid var(--line);border-radius:10px;
+.setekart{display:block}
+.setet{flex:1 1 0;min-width:0;max-width:56px;padding:7px 3px;min-height:50px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;border:1px solid var(--line);border-radius:10px;
   background:var(--surface);font-family:"DM Sans",sans-serif;font-weight:600;font-size:13.5px;
   color:var(--ink);cursor:pointer}
-.setet.tatt{background:var(--surface-2);border-color:transparent;color:var(--ink-3);cursor:default}
+.setet.tatt{background:var(--surface-2);border-color:transparent;color:var(--ink-2);cursor:default}
 .setet.min{background:var(--blue);border-color:var(--blue);color:var(--on-blue)}
 
 /* Varighet: slutten står under starten, slik en kalender gjør det. */
@@ -1120,3 +1126,41 @@ label.person span{flex:1;min-width:0}
 .samtidigmerke{display:inline-block;margin-left:7px;padding:1px 7px;border-radius:999px;
   background:var(--surface-2);color:var(--ink-3);font-size:11px;font-weight:600;
   font-family:"DM Sans",sans-serif;vertical-align:1px}
+
+/* Setekart: én rad per seterad, med midtgangen som et tomrom. Da
+   stemmer kartet med kjøretøyet, uansett om det er to eller seks i
+   bredden — og man finner 12C ved å telle, slik man gjør om bord. */
+.kjkort{border:1px solid var(--line-soft);border-radius:16px;padding:12px;background:var(--surface)}
+.kjtopp{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.kjtopp .grow{min-width:0}
+.kjtopp b{display:block;font-size:16px;font-family:"DM Sans",sans-serif}
+.kjtopp small{display:block;font-size:12.5px;color:var(--ink-3);margin-top:1px}
+.seterad{display:flex;gap:6px;justify-content:center;margin-bottom:6px}
+.seterad:last-child{margin-bottom:0}
+.gang{flex:0 0 28px}
+.setet.tom{visibility:hidden}
+/* Fornavnet under setenummeret: nok til aa finne den du skal sitte med,
+   lite nok til at nummeret fortsatt leses foerst. */
+.setet small{font-size:9.5px;font-weight:500;line-height:1.1;max-width:100%;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.setet b{font-weight:600}
+/* Draahaandtaket i pakkelista. */
+.pkrad .draha{flex:none;border:0;background:none;border-radius:0;color:var(--ink-3);font-size:17px;
+  cursor:grab;padding:0;width:32px;text-align:center;touch-action:none;user-select:none}
+.pkrad.drar{background:var(--surface-2);border-radius:10px;position:relative;z-index:2}
+
+/* Står skrivefeltet tomt fordi du ikke får skrive, må det stå hvorfor
+   — ellers ser chatten ødelagt ut. */
+.bareledere{display:flex;align-items:center;justify-content:center;gap:7px;margin:0;
+  padding:15px 16px;font-size:13.5px;color:var(--ink-3);background:var(--surface-2);
+  border-top:1px solid var(--line-soft)}
+.bareledere svg{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:2;
+  stroke-linecap:round;stroke-linejoin:round}
+/* Av/på i en innstillingsrad, slik iOS gjør det. */
+.bryter{appearance:none;-webkit-appearance:none;flex:none;width:51px;height:31px;
+  border-radius:999px;background:var(--line);position:relative;cursor:pointer;
+  transition:background .2s}
+.bryter::after{content:"";position:absolute;top:2px;left:2px;width:27px;height:27px;
+  border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:transform .2s}
+.bryter:checked{background:var(--moss)}
+.bryter:checked::after{transform:translateX(20px)}

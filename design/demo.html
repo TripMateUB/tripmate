@@ -55,18 +55,32 @@
   }
 })();
 
+const VALG = new URLSearchParams(location.search);
+
 /* ══ en Api som svarer fra malen ══════════════════════════════════ */
 const pakk = [
-  { id: "p1", txt: "Pass", sort: 1, kryss: true },
-  { id: "p2", txt: "Europeisk helsetrygdkort", sort: 2, kryss: true },
-  { id: "p3", txt: "Reiseforsikring — bevis", sort: 3, kryss: false },
-  { id: "p4", txt: "Regnjakke", sort: 4, kryss: true },
-  { id: "p5", txt: "Gode sko til mye gåing", sort: 5, kryss: false },
-  { id: "p6", txt: "Pent antrekk til middagen", sort: 6, kryss: false },
-  { id: "p7", txt: "Lader og powerbank", sort: 7, kryss: true },
-  { id: "p8", txt: "Reiseadapter", sort: 8, kryss: false }
+  { id: "p1", txt: "Pass", sort: 10, kryss: true },
+  { id: "p2", txt: "Europeisk helsetrygdkort", sort: 20, kryss: true },
+  { id: "p3", txt: "Reiseforsikring — bevis", sort: 30, kryss: false },
+  { id: "p4", txt: "Regnjakke", sort: 40, kryss: true },
+  { id: "p5", txt: "Gode sko til mye gåing", sort: 50, kryss: false },
+  { id: "p6", txt: "Pent antrekk til middagen", sort: 60, kryss: false },
+  { id: "p7", txt: "Lader og powerbank", sort: 70, kryss: true },
+  { id: "p8", txt: "Reiseadapter", sort: 80, kryss: false }
 ];
-const seter = [{ nr: 14, meg: true }, { nr: 3 }, { nr: 4 }, { nr: 9 }, { nr: 22 }, { nr: 23 }];
+const pakkEgen = [
+  { id: "e1", txt: "Kamera", sort: 10, kryss: false },
+  { id: "e2", txt: "Bok til bussen", sort: 20, kryss: true }
+];
+const kjoretoy = [
+  { id: "k1", navn: "Buss 1", typ: "buss", plasser: 56, sort: 1,
+    seter: [{ nr: 14, meg: true, hvem: "Jonas Robstad" }, { nr: 3, hvem: "Emma Nygård" },
+      { nr: 4, hvem: "Mathias Lund" }, { nr: 9, hvem: "Kari Reiseleder" },
+      { nr: 22, hvem: "Sofie Haugland" }, { nr: 23, hvem: "Ole Mikkelsen" }] },
+  { id: "k2", navn: "Fly ned", typ: "fly", plasser: 30, sort: 2,
+    seter: [{ nr: 1, hvem: "Emma Nygård" }, { nr: 2, hvem: "Mathias Lund" }] },
+  { id: "k3", navn: "Bil — reiselederne", typ: "bil", plasser: 5, sort: 3, seter: [] }
+];
 
 function lagApi() {
   const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
@@ -108,12 +122,14 @@ function lagApi() {
   const TUR = {
     id: "demo", code: "DEMO12", name: tpl.name, org: tpl.org,
     krevGodkjenning: false, bilder: true, venter: false, dates: label,
-    role: "leader", erAdmin: false, erEier: true,
-    seter: 56,
+    // ?rolle=deltaker og ?tavle=1 lar sjekkene se appen slik en deltaker
+    // ser den, uten en ekte base å sette rollen i.
+    role: VALG.get("rolle") === "deltaker" ? "member" : "leader", erAdmin: false, erEier: true,
     places: stedMap, days,
     channels: tpl.channels.map((c, i) => ({
       id: "kanal" + i, name: c.name, sub: c.sub || null,
-      private: /leder/i.test(c.name), min: true
+      private: /leder/i.test(c.name), min: true,
+      bareLedere: VALG.has("tavle")
     }))
   };
 
@@ -221,21 +237,64 @@ function lagApi() {
     varselStatus: lover("paa"),
     slaaPaaVarsler: lover(undefined), slaaAvVarsler: lover(undefined),
     varselEnheter: lover([]), testVarsel: lover(undefined), varmVarsler: ingen,
-    pakkeliste: () => Promise.resolve(pakk.map(p => ({ ...p }))),
-    kryssPakk: (id, paa) => { const p = pakk.find(x => x.id === id); if (p) p.kryss = paa; return Promise.resolve(); },
-    nyttPakkPunkt: (t, txt, sort) => { pakk.push({ id: "p" + (pakk.length + 1), txt, sort, kryss: false }); return Promise.resolve(); },
-    slettPakkPunkt: id => { const i = pakk.findIndex(x => x.id === id); if (i >= 0) pakk.splice(i, 1); return Promise.resolve(); },
-    seter: () => Promise.resolve(seter.map(s2 => ({ ...s2 }))),
-    taSete: (t, nr) => {
-      if (seter.some(s2 => s2.nr === nr)) return Promise.reject(new Error("Den plassen ble tatt av noen andre."));
-      const i = seter.findIndex(s2 => s2.meg); if (i >= 0) seter.splice(i, 1);
-      seter.push({ nr, meg: true }); return Promise.resolve();
+    pakkeliste: () => Promise.resolve({
+      felles: pakk.map(p => ({ ...p })), egne: pakkEgen.map(p => ({ ...p }))
+    }),
+    kryssPakk: (id, paa, egen) => {
+      const p = (egen ? pakkEgen : pakk).find(x => x.id === id); if (p) p.kryss = paa;
+      return Promise.resolve();
     },
-    slippSete: () => { const i = seter.findIndex(s2 => s2.meg); if (i >= 0) seter.splice(i, 1); return Promise.resolve(); },
-    settSeteantall: (t, n) => { TUR.seter = n; return Promise.resolve(); },
+    nyttPakkPunkt: (t, txt, sort, egen) => {
+      const l = egen ? pakkEgen : pakk;
+      l.push({ id: (egen ? "e" : "p") + (l.length + 1), txt, sort, kryss: false });
+      return Promise.resolve();
+    },
+    slettPakkPunkt: (id, egen) => {
+      const l = egen ? pakkEgen : pakk;
+      const i = l.findIndex(x => x.id === id); if (i >= 0) l.splice(i, 1);
+      return Promise.resolve();
+    },
+    pakkRekkefolge: (ider, egen) => {
+      const l = egen ? pakkEgen : pakk;
+      const ny = ider.map(id => l.find(p => p.id === id)).filter(Boolean);
+      ny.forEach((p, n) => { p.sort = (n + 1) * 10; });
+      l.length = 0; l.push(...ny);
+      return Promise.resolve();
+    },
+    setekart: () => Promise.resolve(kjoretoy.map(k => ({ ...k, seter: k.seter.map(s2 => ({ ...s2 })) }))),
+    taSete: (kj, nr) => {
+      const k = kjoretoy.find(x => x.id === kj);
+      if (!k) return Promise.reject(new Error("Fant ikke kjøretøyet."));
+      if (k.seter.some(s2 => s2.nr === nr)) return Promise.reject(new Error("Den plassen ble tatt av noen andre."));
+      const i = k.seter.findIndex(s2 => s2.meg); if (i >= 0) k.seter.splice(i, 1);
+      k.seter.push({ nr, meg: true, hvem: "Jonas Robstad" }); return Promise.resolve();
+    },
+    slippSete: kj => {
+      const k = kjoretoy.find(x => x.id === kj);
+      if (k) { const i = k.seter.findIndex(s2 => s2.meg); if (i >= 0) k.seter.splice(i, 1); }
+      return Promise.resolve();
+    },
+    nyttKjoretoy: (t, f) => {
+      kjoretoy.push({ id: "k" + (kjoretoy.length + 1), ...f, sort: kjoretoy.length + 1, seter: [] });
+      return Promise.resolve();
+    },
+    endreKjoretoy: (id, f) => {
+      const k = kjoretoy.find(x => x.id === id); if (k) Object.assign(k, f);
+      return Promise.resolve();
+    },
+    slettKjoretoy: id => {
+      const i = kjoretoy.findIndex(x => x.id === id); if (i >= 0) kjoretoy.splice(i, 1);
+      return Promise.resolve();
+    },
+    settChatSkriving: (id, paa) => {
+      const c = TUR.channels.find(x => x.id === id); if (c) c.bareLedere = paa;
+      return Promise.resolve();
+    },
     megTall: () => Promise.resolve({
-      pakkTotalt: pakk.length, pakkKrysset: pakk.filter(p => p.kryss).length,
-      mittSete: (seter.find(s2 => s2.meg) || {}).nr || null
+      pakkTotalt: pakk.length + pakkEgen.length,
+      pakkKrysset: pakk.concat(pakkEgen).filter(p => p.kryss).length,
+      kjoretoy: kjoretoy.length,
+      mineSeter: kjoretoy.filter(k => k.seter.some(s2 => s2.meg)).length
     }),
     lastVarselvalg: lover(undefined), varselvalg: () => ({ tur: "viktig", chat: {} }), varselNiva: () => "alt",
     settVarselNiva: lover(undefined),

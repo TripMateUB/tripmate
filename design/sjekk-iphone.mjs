@@ -25,12 +25,27 @@ const maal = async navn => side.evaluate(n => {
     const k = m.slice(0, 3).map(v => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
     return 0.2126 * k[0] + 0.7152 * k[1] + 0.0722 * k[2];
   };
+  /* Bakgrunnen er ikke nødvendigvis den første fargen vi finner. En
+     halvgjennomsiktig flate over en mørk bakgrunn er noe helt annet enn
+     den samme fargen alene — og det er den blandede fargen øyet ser.
+     Uten dette meldte sjekken «Detaljer 4,00:1» om en knapp som i
+     virkeligheten står på 10,22:1. */
   const bak = el => {
+    const lag = [];
     for (let x = el; x; x = x.parentElement) {
       const b = getComputedStyle(x).backgroundColor;
-      if (b && !/rgba\(0, 0, 0, 0\)|transparent/.test(b)) return b;
+      if (!b || /transparent/.test(b)) continue;
+      const d = b.match(/[\d.]+/g);
+      if (!d) continue;
+      const a = d.length > 3 ? Number(d[3]) : 1;
+      if (a === 0) continue;
+      lag.push([d.slice(0, 3).map(Number), a]);
+      if (a === 1) break;
     }
-    return "rgb(255,255,255)";
+    // Nederste lag først, så legger vi de gjennomsiktige oppå.
+    let ut = [255, 255, 255];
+    for (const [farge, a] of lag.reverse()) ut = farge.map((v, i) => v * a + ut[i] * (1 - a));
+    return `rgb(${ut.map(Math.round).join(",")})`;
   };
   const forhold = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
 
@@ -77,15 +92,45 @@ const maal = async navn => side.evaluate(n => {
   };
 }, navn);
 
-for (const fane of ["idag", "program", "chat", "meg"]) {
-  await side.evaluate(f => document.querySelector(`#tabbar button[data-tab="${f}"]`).click(), fane);
-  await side.waitForTimeout(220);
-  const m = await maal(fane);
-  console.log("\n" + fane.toUpperCase().padEnd(10), `øya ${m.oey.h}px, ${m.oey.bunn}px over bunn · plass under ${m.plassUnder} · kan bla: ${m.kanBla}`);
+const skriv = m => {
+  console.log("\n" + m.fane.toUpperCase().padEnd(10), `øya ${m.oey.h}px, ${m.oey.bunn}px over bunn · plass under ${m.plassUnder} · kan bla: ${m.kanBla}`);
   console.log("  for små:   ", m.smaa.length ? m.smaa.join(" | ") : "ingen");
   console.log("  svak tekst:", m.svak.length ? m.svak.join(" | ") : "ingen");
   console.log("  utenfor:   ", m.utenfor.length ? m.utenfor.join(" | ") : "ingen");
+};
+
+for (const fane of ["idag", "program", "chat", "meg"]) {
+  await side.evaluate(f => document.querySelector(`#tabbar button[data-tab="${f}"]`).click(), fane);
+  await side.waitForTimeout(220);
+  skriv(await maal(fane));
 }
+
+/* Undersidene har sine egne knapper og sine egne lister, og det er der
+   nye feil kommer inn. Måles med samme målebånd som fanene. */
+for (const [navn, vei] of [
+  ["pakk", '[data-side="pakk"]'], ["seter", '[data-side="seter"]']
+]) {
+  await side.evaluate(() => document.querySelector('#tabbar button[data-tab="idag"]').click());
+  await side.waitForTimeout(250);
+  await side.evaluate(v => document.querySelector(v).click(), vei);
+  await side.waitForTimeout(700);
+  skriv(await maal(navn));
+}
+
+await side.evaluate(() => document.querySelector('#tabbar button[data-tab="chat"]').click());
+await side.waitForTimeout(250);
+await side.evaluate(() => document.querySelector("[data-openchat]").click());
+await side.waitForTimeout(500);
+skriv(await maal("samtale"));
+await side.evaluate(() => document.querySelector("#convhead .t").click());
+await side.waitForTimeout(600);
+skriv(await maal("chatside"));
+await side.evaluate(() => document.querySelector("#tabbar button[data-tab=\"meg\"]").click());
+await side.waitForTimeout(250);
+await side.evaluate(() => document.querySelector('[data-sheet="deltakere"]').click());
+await side.waitForTimeout(700);
+skriv(await maal("deltakere"));
+
 
 console.log("\n" + (feil.length ? "FEIL:\n  " + feil.join("\n  ") : "ingen feil i konsollen"));
 await nb.close();

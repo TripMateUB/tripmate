@@ -363,6 +363,7 @@ const UI = (() => {
     if (trip.venter) { S.trip = null; return visVenter(trip); }
 
     S.trip = trip;
+    hentMegTall();
     S.offline = Boolean(trip.stale);
     Api.setLastTrip(tripId);
     // Sto du på torsdag og rettet et klokkeslett, skal du fortsatt stå på
@@ -519,7 +520,43 @@ const UI = (() => {
                 ${p ? `<span class="s">${esc(p.name)}</span>` : (i.note ? `<span class="s">${esc(i.note)}</span>` : "")}</span>
               <span class="pil">${ICON.chev}</span></button>`;
           }).join("")}
-        </div>` : ""}`;
+        </div>` : ""}
+      ${praktisk()}`;
+  }
+
+  /* Pakkelista og setekartet: turens to praktiske lister. Tallene til
+     høyre hentes én gang, og raden står der uansett — en tom verdi er
+     bedre enn en rad som dukker opp etterpå og flytter alt nedover. */
+  /* Med flere kjøretøy er det ikke ett setenavn å vise. Det som betyr
+     noe er om du mangler en plass et sted. */
+  function setetekst(tall) {
+    if (!tall) return "";
+    if (!tall.kjoretoy) return "Ikke satt opp";
+    const mangler = tall.kjoretoy - tall.mineSeter;
+    return mangler > 0 ? `Mangler ${mangler}` : "Alt valgt";
+  }
+
+  function praktisk() {
+    const tall = S.megTall;
+    const trip = S.trip;
+    return `<div>
+      <div class="eyebrow" style="margin-bottom:8px">Praktisk</div>
+      <div class="gruppe"><div class="list">
+        <button class="listrow" data-side="pakk">
+          <span class="rikon mose">${ICON.sekk}</span>
+          <div class="grow"><div class="nm">Pakkeliste</div></div>
+          <span class="verdi">${tall
+            ? (tall.pakkTotalt ? `${tall.pakkKrysset} av ${tall.pakkTotalt}` : "Ingen punkter")
+            : ""}</span>
+          <span class="chev">${ICON.chev}</span></button>
+
+        <button class="listrow" data-side="seter">
+          <span class="rikon">${ICON.sete}</span>
+          <div class="grow"><div class="nm">Sitteplasser</div></div>
+          <span class="verdi">${setetekst(tall)}</span>
+          <span class="chev">${ICON.chev}</span></button>
+      </div></div>
+    </div>`;
   }
 
   /* ───────── varighet ─────────
@@ -551,11 +588,18 @@ const UI = (() => {
     return sett;
   }
 
-  const VARIGHETER = [[0, "Ikke satt"], [15, "15 minutter"], [30, "30 minutter"],
-    [45, "45 minutter"], [60, "1 time"], [90, "1 time 30"], [120, "2 timer"],
-    [180, "3 timer"], [240, "4 timer"], [360, "6 timer"], [480, "8 timer"]];
-  const varighetValg = v => VARIGHETER.map(([m, navn]) =>
-    `<option value="${m}"${(v || 0) === m ? " selected" : ""}>${navn}</option>`).join("");
+  /* Varigheten skrives som sluttklokke, fordi det er den reiselederen
+     har i papirene: «omvisning 10–12», ikke «omvisning varer 120 minutter».
+     Minuttene er bare måten vi lagrer det på. */
+  function minutterTil(start, sluttTid) {
+    if (!start || !sluttTid) return null;
+    const d = minutt(sluttTid) - minutt(start);
+    if (d === 0) return null;                 // samme klokke = ingen varighet
+    // shortcut: et punkt kan ikke gå over midnatt. Skal det det, deles
+    // det i to punkter. Oppgraderes først hvis nattbusser blir vanlig.
+    if (d < 0) throw new Error("Slutt-tiden er før start-tiden.");
+    return d;
+  }
 
   function nextEvent(trip) {
     const t = new Date().toTimeString().slice(0, 5);
@@ -727,7 +771,17 @@ const UI = (() => {
      slipper. Uten touch-action:none ville telefonen skrollet i stedet. */
   function settOppDraing() {
     const tl = $("screen").querySelector(".tl");
-    if (!tl || !S.edit) return;
+    if (tl && S.edit) draRekkefolge(tl, "ev", r => r.dataset.item, lagreRekkefolge);
+
+    // Pakkelista har sin egen liste, og den kan dras uten redigeringsmodus:
+    // å sortere pakkelista er ikke en farlig handling.
+    for (const liste of $("screen").querySelectorAll(".pkliste")) {
+      draRekkefolge(liste, "pkrad", r => r.dataset.pid,
+        ids => lagrePakkRekkefolge(liste.dataset.egen === "1", ids));
+    }
+  }
+
+  function draRekkefolge(tl, radklasse, idAv, lagre) {
 
     let rad = null, startY = 0, ramme = null, hvile = null;
 
@@ -742,7 +796,7 @@ const UI = (() => {
     tl.addEventListener("pointerdown", e => {
       const hank = e.target.closest("[data-drag]");
       if (!hank) return;
-      rad = hank.closest(".ev");
+      rad = hank.closest("." + radklasse);
       if (!rad) return;
       e.preventDefault();
       startY = e.clientY;
@@ -766,7 +820,7 @@ const UI = (() => {
       // har passert midten av den. Ellers bytter raden plass med seg selv.
       const midt = hvile.top + dy + hvile.height / 2;
       const nabo = dy > 0 ? rad.nextElementSibling : dy < 0 ? rad.previousElementSibling : null;
-      if (!nabo || !nabo.classList.contains("ev")) return;
+      if (!nabo || !nabo.classList.contains(radklasse)) return;
 
       const r = nabo.getBoundingClientRect();
       const passert = dy > 0 ? midt > r.top + r.height / 2 : midt < r.top + r.height / 2;
@@ -783,8 +837,8 @@ const UI = (() => {
       rad.style.transform = "";
       rad.classList.remove("drar");
       rad = null;
-      const ids = [...tl.querySelectorAll(".ev")].map(r => r.dataset.item);
-      await lagreRekkefolge(ids);
+      const ids = [...tl.querySelectorAll("." + radklasse)].map(idAv);
+      await lagre(ids);
     }
     tl.addEventListener("pointerup", slipp);
     tl.addEventListener("pointercancel", slipp);
@@ -1295,6 +1349,9 @@ const UI = (() => {
               <button class="linkbtn skjulknapp" data-skjul="${esc(x.slag)}" data-skjulid="${esc(x.id)}">ikke nødvendig</button>
             </div>`).join("")}</div>
           </div>
+          ${o.some(x => /Fant ikke posisjonen/.test(x.hva))
+            ? `<button class="linkbtn" style="font-size:13px" data-vaerigjen="1">Slå opp adressene på nytt</button>`
+            : ""}
           ${skjultLenke}
         </div>`;
 
@@ -1326,21 +1383,6 @@ const UI = (() => {
             <span class="verdi"${varslerAv ? ' style="color:var(--amber)"' : ""}>${esc(varselTekst)}</span>
             <span class="chev">${ICON.chev}</span></button>
 
-          <button class="listrow" data-side="pakk">
-            <span class="rikon mose">${ICON.sekk}</span>
-            <div class="grow"><div class="nm">Pakkeliste</div></div>
-            <span class="verdi">${tall
-              ? (tall.pakkTotalt ? `${tall.pakkKrysset} av ${tall.pakkTotalt}` : "Ingen punkter")
-              : ""}</span>
-            <span class="chev">${ICON.chev}</span></button>
-
-          <button class="listrow" data-side="seter">
-            <span class="rikon">${ICON.sete}</span>
-            <div class="grow"><div class="nm">Sitteplasser</div></div>
-            <span class="verdi">${tall
-              ? (!trip.seter ? "Ikke satt opp" : tall.mittSete ? `Sete ${setenavn(tall.mittSete)}` : "Ledig valg")
-              : ""}</span>
-            <span class="chev">${ICON.chev}</span></button>
 
           ${trip.role === "leader" ? `<button class="listrow" data-sheet="endretur">
             <span class="rikon grunn">${ICON.blyant}</span>
@@ -1426,7 +1468,9 @@ const UI = (() => {
       $("convSub").textContent = S.trip.name;
     } else if (conv) {
       $("convName").textContent = conv.name;
-      $("convSub").textContent = conv.private ? "Privat · bare de som er lagt til" : "Åpen for alle på turen";
+      $("convSub").textContent = conv.private ? "Privat · bare de som er lagt til"
+        : conv.bareLedere ? "Oppslagstavle · reiselederne skriver"
+        : "Åpen for alle på turen";
       $("convWho").dataset.members = conv.id;
     } else {
       $("tripName").textContent = S.trip.name;
@@ -1486,7 +1530,11 @@ const UI = (() => {
     const markor = haddeFokus ? gammeltFelt.selectionStart : null;
     S.sisteComposer = S.openChat;
 
-    if (conv && !S.offline) {
+    if (conv && !S.offline && !kanSkrive(conv)) {
+      slot.innerHTML = `<p class="bareledere">${ICON.info} Bare reiseledere skriver i denne chatten.</p>`;
+      const sc0 = $("screen");
+      if (naerBunn) sc0.scrollTop = sc0.scrollHeight;
+    } else if (conv && !S.offline) {
       slot.innerHTML = `
         ${S.nye ? `<button class="nyepill" data-nye="1">${S.nye} ny${S.nye === 1 ? " melding" : "e meldinger"} ↓</button>` : ""}
         ${S.svarTil ? `<div class="svarforhaand">
@@ -1679,12 +1727,12 @@ const UI = (() => {
     if (!S.trip || (S.megTall && !tvang)) return;
     Api.megTall(S.trip.id).then(t => {
       S.megTall = t;
-      if (S.trip && S.tab === "meg" && !S.side && !S.openChat) render();
+      if (S.trip && (S.tab === "meg" || S.tab === "idag") && !S.side && !S.openChat) render();
     }).catch(() => {});
   }
 
   function byttFane(id) {
-    if (id === "meg") hentMegTall();
+    if (id === "meg" || id === "idag") hentMegTall();
     if (S.tab === id && !S.openChat && !S.side) return;
     S.tab = id; S.openChat = null; S.side = null;
     render();
@@ -2139,8 +2187,7 @@ const UI = (() => {
           <div class="field"><label for="eTid">Klokkeslett</label>
             <input id="eTid" type="time" value="${esc(it.t)}">
             <small style="color:var(--ink-3);display:block;margin-top:5px">La stå tomt hvis tiden ikke er bestemt.</small></div>
-          <div class="field"><label for="eVarer">Varer</label>
-            <select id="eVarer" class="select">${varighetValg(it.minutter)}</select></div>
+          <div class="field"><label for="eSlutt">Slutter</label><input id="eSlutt" type="time" value="${esc(slutt(it) || "")}"></div>
           <div class="field"><label for="eTittel">Hva skjer</label><input id="eTittel" value="${esc(it.title)}"></div>
           <div class="field"><label for="eSted">Sted</label>
             <select id="eSted" class="select">
@@ -2222,7 +2269,7 @@ const UI = (() => {
         try {
           await Api.updateItem(it.id, {
             t: $("eTid").value,
-            minutter: Number($("eVarer").value) || null,
+            minutter: minutterTil($("eTid").value, $("eSlutt").value),
             title: $("eTittel").value.trim() || it.title,
             placeId,
             note: $("eNotat").value.trim(),
@@ -2438,6 +2485,12 @@ const UI = (() => {
   const kanDoppe = ch =>
     Boolean(ch) && (ch.private ? true : S.trip.role === "leader");
 
+  /* En oppslagstavle har ikke et skrivefelt for dem som ikke skal
+     skrive. Et felt som avviser deg når du trykker send er verre enn
+     ingen felt: du har alt skrevet meldingen. */
+  const kanSkrive = ch =>
+    Boolean(ch) && (!ch.bareLedere || S.trip.role === "leader");
+
 
   function sheetAddDay() {
     const last = S.trip.days[S.trip.days.length - 1];
@@ -2480,10 +2533,9 @@ const UI = (() => {
       <p class="muted" style="margin:6px 0 14px">${esc(day ? day.label : "")}</p>
       <form id="addItemForm">
         <div class="field"><label for="iTime">Klokkeslett</label><input id="iTime" type="time" value="09:00"></div>
-        <div class="field"><label for="iVarer">Varer</label>
-          <select id="iVarer" class="select">${varighetValg(0)}</select>
+        <div class="field"><label for="iSlutt">Slutter</label><input id="iSlutt" type="time">
           <small style="display:block;margin-top:5px;font-size:12.5px;color:var(--ink-3)">
-            Har to punkter varighet som overlapper, viser appen at de skjer samtidig.</small></div>
+            Valgfritt. Overlapper to punkter i tid, merker appen dem som samtidige.</small></div>
         <div class="field"><label for="iTitle">Hva skjer</label><input id="iTitle" placeholder="Omvisning Berlinmuren"></div>
         <div class="field">
           <label for="iPlace">Sted</label>
@@ -2530,7 +2582,7 @@ const UI = (() => {
         }
         await Api.addItem(S.trip.id, dayId, {
           t: $("iTime").value, title, placeId, note: $("iNote").value.trim(),
-          minutter: Number($("iVarer").value) || null
+          minutter: minutterTil($("iTime").value, $("iSlutt").value)
         });
         closeSheet();
         await openTrip(S.trip.id);
@@ -2817,7 +2869,28 @@ const UI = (() => {
   /* ───────── pakkeliste og sitteplasser ─────────
      Begge er egne sider, ikke ark: lista blir lang, og et setekart man
      skal sikte på er dårlig å ha i noe som kan dras ned. */
-  const setenavn = nr => Math.ceil(nr / 4) + "ABCD"[(nr - 1) % 4];
+  /* En tur sitter ikke på én måte. Ned med fly, hjem med tog, og to
+     busser mellom — hvert kjøretøy har sin egen bredde og sin egen
+     midtgang, og derfor sitt eget kart. Typen er det eneste vi spør
+     om; resten følger av den. */
+  const TYPER = {
+    buss:     { navn: "Buss",     bredde: 4, gang: 2 },
+    minibuss: { navn: "Minibuss", bredde: 3, gang: 1 },
+    bil:      { navn: "Bil",      bredde: 2, gang: 1 },
+    tog:      { navn: "Tog",      bredde: 4, gang: 2 },
+    fly:      { navn: "Fly",      bredde: 6, gang: 3 },
+    baat:     { navn: "Båt",      bredde: 4, gang: 2 },
+    annet:    { navn: "Annet",    bredde: 4, gang: 0 }
+  };
+  const oppsett = typ => TYPER[typ] || TYPER.annet;
+  const setenavn = (nr, bredde) => Math.ceil(nr / bredde) + "ABCDEF"[(nr - 1) % bredde];
+
+  /* Det er plass til ett ord i et sete. Fornavnet er det som skiller
+     folk fra hverandre i en klasse, og det er det man leter etter. */
+  const fornavn = navn => {
+    const f = String(navn || "").trim().split(/\s+/)[0] || "";
+    return f.length > 9 ? f.slice(0, 8) + "…" : f;
+  };
 
   async function aapnePakk(fraHistorikk) {
     S.side = "pakk"; S.pakk = null; S.pakkFeil = false;
@@ -2832,71 +2905,141 @@ const UI = (() => {
     S.side = "seter"; S.setekart = null; S.seteFeil = false;
     if (!fraHistorikk) history.pushState({ side: "seter" }, "");
     render();
-    if (!S.trip.seter) return;
-    try { S.setekart = await Api.seter(S.trip.id); }
+    try { S.setekart = await Api.setekart(S.trip.id); }
     catch { S.setekart = []; S.seteFeil = true; }
     if (S.side === "seter") render();
   }
 
+  /* To deler, fordi de svarer på to ting. Reiselederens del er den samme
+     for alle og sier hva turen krever. Din del er din egen, og ingen
+     andre ser den — heller ikke reiselederen. Begge kan dras i den
+     rekkefølgen du vil ha dem, så du kan samle klærne for seg. */
   function viewPakk() {
     const leder = S.trip.role === "leader";
     const liste = S.pakk;
     if (S.pakkFeil) return '<p class="muted">Klarte ikke hente pakkelista. Sjekk nettet og prøv igjen.</p>';
     if (!liste) return venter("Henter pakkelista");
-    const klart = liste.filter(p => p.kryss).length;
+
+    const alle = liste.felles.concat(liste.egne);
+    const klart = alle.filter(p => p.kryss).length;
+
+    const rad = (p, egen) => `<div class="pkrad" data-pid="${esc(p.id)}">
+      <button class="pkhake ${p.kryss ? "av" : ""}" data-pakk="${esc(p.id)}"
+        ${egen ? 'data-egen="1"' : ""} aria-pressed="${p.kryss}"
+        aria-label="${p.kryss ? "Fjern krysset for" : "Kryss av"} ${esc(p.txt)}">${p.kryss ? ICON.hake : ""}</button>
+      <span class="pknavn ${p.kryss ? "av" : ""}">${esc(p.txt)}</span>
+      ${egen || leder ? `<button class="minibtn fare" data-slettpakk="${esc(p.id)}"
+        ${egen ? 'data-egen="1"' : ""} aria-label="Slett ${esc(p.txt)}">✕</button>` : ""}
+      <span class="draha" data-drag aria-label="Dra for å flytte">⠿</span>
+    </div>`;
+
+    const del = (tittel, under, punkter, egen, knapp) => `<div>
+      <div class="eyebrow" style="margin-bottom:8px">${esc(tittel)}</div>
+      ${punkter.length
+        ? `<div class="gruppe"><div class="list pkliste" data-egen="${egen ? 1 : 0}">
+            ${punkter.map(p => rad(p, egen)).join("")}</div></div>`
+        : `<p class="muted" style="margin:0 0 10px">${esc(under)}</p>`}
+      ${knapp}</div>`;
 
     return `
-      <p class="muted" style="margin:0">${liste.length
-        ? `${klart} av ${liste.length} klart. Det du krysser av er ditt — ingen andre ser det, heller ikke reiselederen.`
+      <p class="muted" style="margin:0">${alle.length
+        ? `${klart} av ${alle.length} klart. Det du krysser av er ditt — ingen andre ser det.`
         : leder ? "Lag lista her. Alle på turen ser punktene og krysser av for seg selv."
-                : "Reiselederen har ikke lagt inn noe ennå."}</p>
+                : "Reiselederen har ikke lagt inn noe ennå. Du kan legge inn dine egne ting under."}</p>
 
-      ${liste.length ? `<div class="gruppe"><div class="list">
-        ${liste.map(p => `<div class="pkrad">
-          <button class="pkhake ${p.kryss ? "av" : ""}" data-pakk="${esc(p.id)}" aria-pressed="${p.kryss}"
-            aria-label="${p.kryss ? "Fjern krysset for" : "Kryss av"} ${esc(p.txt)}">${p.kryss ? ICON.hake : ""}</button>
-          <span class="pknavn ${p.kryss ? "av" : ""}">${esc(p.txt)}</span>
-          ${leder ? `<button class="minibtn fare" data-slettpakk="${esc(p.id)}"
-            aria-label="Slett ${esc(p.txt)}">✕</button>` : ""}
-        </div>`).join("")}
-      </div></div>` : ""}
+      ${del("Fra reiselederen", leder
+        ? "Ingen felles punkter ennå."
+        : "Reiselederen har ikke lagt inn noe ennå.", liste.felles, false,
+        leder ? `<button class="btn" style="width:100%" data-sheet="nyttpakk">Legg til felles punkt</button>` : "")}
 
-      ${leder ? `<button class="btn big" data-sheet="nyttpakk">Legg til punkt</button>` : ""}`;
+      ${del("Mine egne ting", "Ingenting her ennå.", liste.egne, true,
+        `<button class="btn" style="width:100%" data-sheet="nyttpakk" data-egen="1">Legg til mitt eget</button>`)}`;
+  }
+
+  async function lagrePakkRekkefolge(egen, ider) {
+    const del = egen ? S.pakk.egne : S.pakk.felles;
+    if (del.map(p => p.id).join() === ider.join()) return;   // ingenting flyttet seg
+    const ny = ider.map(id => del.find(p => p.id === id)).filter(Boolean);
+    if (egen) S.pakk.egne = ny; else S.pakk.felles = ny;
+    try { await Api.pakkRekkefolge(ider, egen); }
+    catch { toast("Klarte ikke lagre rekkefølgen."); await aapnePakk(true); }
   }
 
   function viewSeter() {
     const leder = S.trip.role === "leader";
-    const antall = S.trip.seter;
-    if (!antall) return `
-      <p class="muted" style="margin:0">${leder
-        ? "Si hvor mange plasser det er, så velger alle sin egen."
-        : "Reiselederen har ikke satt opp setekart ennå."}</p>
-      ${leder ? `<button class="btn big" data-sheet="seteoppsett">Sett opp setekart</button>` : ""}`;
-
-    if (S.seteFeil) return '<p class="muted">Klarte ikke hente setekartet. Sjekk nettet og prøv igjen.</p>';
+    if (S.seteFeil) return '<p class="muted">Klarte ikke hente setekartene. Sjekk nettet og prøv igjen.</p>';
     const kart = S.setekart;
-    if (!kart) return venter("Henter setekartet");
-    const tatt = new Map(kart.map(x => [x.nr, x]));
-    const mitt = kart.find(x => x.meg);
+    if (!kart) return venter("Henter setekartene");
 
+    const nyknapp = leder
+      ? `<button class="btn big" data-nykj="1">Legg til kjøretøy</button>`
+      : "";
+
+    if (!kart.length) return `
+      <p class="muted" style="margin:0">${leder
+        ? "Legg inn hvert kjøretøy turen bruker — en buss, et fly, to minibusser. Alle velger sin egen plass i hvert av dem."
+        : "Reiselederen har ikke satt opp noe setekart ennå."}</p>
+      ${nyknapp}`;
+
+    // Mangler du plass et sted, er det det eneste du trenger å vite her.
+    const uten = kart.filter(k => !k.seter.some(s2 => s2.meg));
     return `
-      <p class="muted" style="margin:0">${mitt
-        ? `Du har <b>${setenavn(mitt.nr)}</b>. Trykk på et ledig sete for å bytte.`
-        : "Trykk på et ledig sete for å ta det."}</p>
-
-      <div class="setekart">
-        ${Array.from({ length: antall }, (_, i) => {
-          const nr = i + 1, s2 = tatt.get(nr), min = Boolean(s2 && s2.meg);
-          return `<button class="setet ${min ? "min" : s2 ? "tatt" : ""}" data-sete="${nr}"
-            ${s2 && !min ? "disabled" : ""}>${setenavn(nr)}</button>`;
-        }).join("")}
-      </div>
-
-      ${leder ? `<button class="btn big" data-sheet="seteoppsett">Endre antall plasser</button>` : ""}`;
+      <p class="muted" style="margin:0">${uten.length
+        ? `Du mangler plass i ${uten.length === kart.length && kart.length === 1
+            ? "kartet under" : `${uten.length} av ${kart.length}`}. Trykk på et ledig sete.`
+        : "Du har plass i alle. Trykk på et ledig sete for å bytte."}</p>
+      ${kart.map(k => kjoretoykort(k, leder)).join("")}
+      ${nyknapp}`;
   }
 
-  function sheetNyttPakk() {
-    openSheet(`<h3>Nytt punkt på pakkelista</h3>
+  /* Ett kjøretøy: navnet, din plass, og kartet. Midtgangen tegnes som
+     et tomrom i raden, ikke som et sete — ellers teller man feil når
+     man leter etter 12C. */
+  function kjoretoykort(k, leder) {
+    const o = oppsett(k.typ);
+    const tatt = new Map(k.seter.map(s2 => [s2.nr, s2]));
+    const mitt = k.seter.find(s2 => s2.meg);
+    const rader = Math.ceil(k.plasser / o.bredde);
+
+    const rad = r => {
+      const ut = [];
+      for (let c = 0; c < o.bredde; c++) {
+        const nr = r * o.bredde + c + 1;
+        if (o.gang && c === o.gang) ut.push('<span class="gang" aria-hidden="true"></span>');
+        if (nr > k.plasser) { ut.push('<span class="setet tom" aria-hidden="true"></span>'); continue; }
+        const s2 = tatt.get(nr), min = Boolean(s2 && s2.meg);
+        const plass = setenavn(nr, o.bredde);
+        const hvem = min ? "Deg" : s2 ? fornavn(s2.hvem) : "";
+        ut.push(`<button class="setet ${min ? "min" : s2 ? "tatt" : ""}"
+          data-sete="${nr}" data-kj="${esc(k.id)}" ${s2 && !min ? "disabled" : ""}
+          aria-label="${plass} i ${esc(k.navn)} — ${s2 ? esc(min ? "deg" : s2.hvem) : "ledig"}"
+          ><b>${plass}</b>${hvem ? `<small>${esc(hvem)}</small>` : ""}</button>`);
+      }
+      return `<div class="seterad">${ut.join("")}</div>`;
+    };
+
+    // Din plass hører til i undertittelen, ikke i en egen kolonne: med et
+    // langt kjøretøynavn ble de tre tingene stående og slåss om bredden.
+    const status = mitt
+      ? `du har ${setenavn(mitt.nr, o.bredde)}`
+      : `${k.seter.length} tatt`;
+
+    return `<div class="kjkort">
+      <div class="kjtopp">
+        <div class="grow"><b>${esc(k.navn)}</b>
+          <small>${esc(o.navn)} · ${k.plasser} plasser · ${esc(status)}</small></div>
+        ${leder ? `<button class="minibtn" data-endrekj="${esc(k.id)}"
+          aria-label="Endre ${esc(k.navn)}">${ICON.blyant}</button>` : ""}
+      </div>
+      <div class="setekart">${Array.from({ length: rader }, (_, r) => rad(r)).join("")}</div>
+    </div>`;
+  }
+
+  function sheetNyttPakk(egen) {
+    openSheet(`<h3>${egen ? "Noe du selv må huske" : "Nytt felles punkt"}</h3>
+      <p class="lede">${egen
+        ? "Bare du ser dette punktet."
+        : "Alle på turen får punktet i lista si."}</p>
       <form id="pakkForm">
         <div class="field"><label for="pkTxt">Hva skal med?</label>
           <input id="pkTxt" type="text" maxlength="80" placeholder="Pass" autocomplete="off"></div>
@@ -2909,9 +3052,10 @@ const UI = (() => {
       e.preventDefault();
       const txt = $("pkTxt").value.trim();
       if (!txt) return;
-      const neste = (S.pakk || []).reduce((h, p) => Math.max(h, p.sort || 0), 0) + 1;
+      const del = (egen ? S.pakk.egne : S.pakk.felles) || [];
+      const neste = del.reduce((h, p) => Math.max(h, p.sort || 0), 0) + 10;
       try {
-        await Api.nyttPakkPunkt(S.trip.id, txt, neste);
+        await Api.nyttPakkPunkt(S.trip.id, txt, neste, egen);
         closeSheet();
         await aapnePakk(true);
       } catch (err) {
@@ -2920,28 +3064,50 @@ const UI = (() => {
     });
   }
 
-  function sheetSeteoppsett() {
-    openSheet(`<h3>Setekart</h3>
-      <p class="lede">Hvor mange plasser er det? Fire i bredden, slik en buss står.</p>
-      <form id="seteForm">
-        <div class="field"><label for="stAnt">Antall plasser</label>
-          <input id="stAnt" type="number" min="4" max="120" step="4" value="${S.trip.seter || 56}"></div>
-        <p class="err" id="stErr" hidden></p>
-        <button class="btn primary big" type="submit">Lagre</button>
+  function sheetKjoretoy(id) {
+    const k = id && (S.setekart || []).find(x => x.id === id);
+    const typ = k ? k.typ : "buss";
+    openSheet(`<h3>${k ? "Endre kjøretøy" : "Nytt kjøretøy"}</h3>
+      <p class="lede">Typen bestemmer hvor bredt kartet står og hvor midtgangen går.</p>
+      <form id="kjForm">
+        <div class="field"><label for="kjNavn">Navn</label>
+          <input id="kjNavn" type="text" maxlength="40" placeholder="Buss 1"
+            value="${k ? esc(k.navn) : ""}" autocomplete="off"></div>
+        <div class="field"><label for="kjTyp">Type</label>
+          <select id="kjTyp" class="select">
+            ${Object.entries(TYPER).map(([v, o]) =>
+              `<option value="${v}"${v === typ ? " selected" : ""}>${o.navn} — ${o.bredde} i bredden</option>`).join("")}
+          </select></div>
+        <div class="field"><label for="kjAnt">Antall plasser</label>
+          <input id="kjAnt" type="number" min="1" max="400" inputmode="numeric" value="${k ? k.plasser : 56}">
+        </div>
+        <p class="err" id="kjErr" hidden></p>
+        <button class="btn primary big" type="submit" id="kjLagre">Lagre</button>
       </form>
+      ${k ? `<button class="btn danger" style="width:100%;margin-top:10px"
+        data-slettkj="${esc(k.id)}">Slett kjøretøyet</button>` : ""}
       <button class="btn close" data-close>Avbryt</button>`);
 
-    $("seteForm").addEventListener("submit", async e => {
+    $("kjForm").addEventListener("submit", async e => {
       e.preventDefault();
-      const n = parseInt($("stAnt").value, 10);
-      if (!n || n < 4 || n > 120) return;
+      const err = $("kjErr"), btn = $("kjLagre");
+      const navn = $("kjNavn").value.trim();
+      const plasser = parseInt($("kjAnt").value, 10);
+      if (!navn) { err.textContent = "Gi kjøretøyet et navn."; err.hidden = false; return; }
+      if (!plasser || plasser < 1 || plasser > 400) {
+        err.textContent = "Antall plasser må være mellom 1 og 400."; err.hidden = false; return;
+      }
+      const felter = { navn, typ: $("kjTyp").value, plasser };
+      btn.disabled = true; btn.textContent = "Lagrer…";
       try {
-        await Api.settSeteantall(S.trip.id, n);
+        if (k) await Api.endreKjoretoy(k.id, felter);
+        else await Api.nyttKjoretoy(S.trip.id, felter);
         closeSheet();
-        S.trip.seter = n;
         await aapneSeter(true);
-      } catch (err) {
-        const e2 = $("stErr"); e2.textContent = err.message; e2.hidden = false;
+        hentMegTall(true);
+      } catch (e2) {
+        btn.disabled = false; btn.textContent = "Lagre";
+        err.textContent = e2.message; err.hidden = false;
       }
     });
   }
@@ -3269,6 +3435,8 @@ const UI = (() => {
           <b>${esc(ch.name)}</b>
           <small>${ch.private
             ? "Privat chat — bare de som står under, ser den"
+            : ch.bareLedere
+            ? "Oppslagstavle — alle på turen leser, reiseledere skriver"
             : "Åpen chat — alle på turen kan lese og skrive"}</small>
         </span>
       </div>
@@ -3279,6 +3447,11 @@ const UI = (() => {
           ${kanDoppe(ch) ? `<button class="listrow" data-sheet="doppchat" data-chat="${esc(ch.id)}">
             <div class="grow"><div class="nm">Endre navn</div><div class="sub">${esc(ch.name)}</div></div>
             <span class="chev">${ICON.chev}</span></button>` : ""}
+          ${S.trip.role === "leader" && !ch.private ? `<label class="listrow" style="cursor:pointer">
+            <div class="grow"><div class="nm">Bare reiseledere kan skrive</div>
+              <div class="sub">Alle leser. Deltakerne får ikke skrivefelt.</div></div>
+            <input type="checkbox" class="bryter" data-chatskriv="${esc(ch.id)}"
+              ${ch.bareLedere ? "checked" : ""}></label>` : ""}
           <div class="listrow" style="cursor:default">
             <div class="grow"><div class="nm">Varsler herfra</div>
               <div class="sub">Egne varsler for denne chatten</div></div>
@@ -3684,8 +3857,16 @@ const UI = (() => {
   }
 
   /* ───────────────── hendelser ───────────────── */
+  document.addEventListener("change", async e => {
+    const bryter = e.target.closest("[data-chatskriv]");
+    if (!bryter) return;
+    const id = bryter.dataset.chatskriv, paa = bryter.checked;
+    try { await Api.settChatSkriving(id, paa); render(); }
+    catch { bryter.checked = !paa; toast("Klarte ikke lagre. Har du kjørt siste SQL?"); }
+  });
+
   document.addEventListener("click", async e => {
-    const t = e.target.closest("[data-tab],[data-side],[data-pakk],[data-slettpakk],[data-sete],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-msgmeny],[data-chat],[data-paa],[data-slettchat],[data-bilde],[data-slettbilde],[data-bvlukk],[data-bvmeny],[data-lagrebilde],[data-kopimeld],[data-deltekst],[data-chatside],[data-cmadd],[data-cmdel],[data-cmleave],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn,#skjulInstall,#installKnapp");
+    const t = e.target.closest("[data-tab],[data-side],[data-pakk],[data-slettpakk],[data-sete],[data-nykj],[data-endrekj],[data-slettkj],[data-vaerigjen],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-msgmeny],[data-chat],[data-paa],[data-slettchat],[data-bilde],[data-slettbilde],[data-bvlukk],[data-bvmeny],[data-lagrebilde],[data-kopimeld],[data-deltekst],[data-chatside],[data-cmadd],[data-cmdel],[data-cmleave],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn,#skjulInstall,#installKnapp");
     if (!t) return;
 
     if (t.id === "joinTilbake") { S.fraStart = false; return visAuth("start"); }
@@ -3743,34 +3924,70 @@ const UI = (() => {
     // Krysset settes med en gang på skjermen. Går det galt, settes det
     // tilbake — ellers står det et kryss som ikke finnes i basen.
     if (t.dataset.pakk) {
-      const p = (S.pakk || []).find(x => x.id === t.dataset.pakk);
+      const egen = t.dataset.egen === "1";
+      const p = ((egen ? S.pakk.egne : S.pakk.felles) || []).find(x => x.id === t.dataset.pakk);
       if (!p) return;
       const foer = p.kryss;
       p.kryss = !foer; render();
-      try { await Api.kryssPakk(p.id, p.kryss); }
+      try { await Api.kryssPakk(p.id, p.kryss, egen); }
       catch { p.kryss = foer; render(); toast("Krysset ble ikke lagret."); }
       return;
     }
 
     if (t.dataset.slettpakk) {
-      if (!confirm("Slette dette punktet for alle på turen?")) return;
-      try { await Api.slettPakkPunkt(t.dataset.slettpakk); await aapnePakk(true); }
+      const egen = t.dataset.egen === "1";
+      if (!confirm(egen ? "Slette dette punktet?" : "Slette dette punktet for alle på turen?")) return;
+      try { await Api.slettPakkPunkt(t.dataset.slettpakk, egen); await aapnePakk(true); }
       catch { toast("Klarte ikke slette punktet."); }
       return;
     }
 
-    if (t.dataset.sete) {
+    if (t.dataset.sete && t.dataset.kj) {
       const nr = parseInt(t.dataset.sete, 10);
-      const mitt = (S.setekart || []).find(x => x.meg);
+      const k = (S.setekart || []).find(x => x.id === t.dataset.kj);
+      if (!k) return;
+      const mitt = k.seter.find(x => x.meg);
+      const navn = setenavn(nr, oppsett(k.typ).bredde);
       try {
         if (mitt && mitt.nr === nr) {
-          if (!confirm("Slippe plassen " + setenavn(nr) + "?")) return;
-          await Api.slippSete(S.trip.id);
+          if (!confirm(`Slippe plassen ${navn} i ${k.navn}?`)) return;
+          await Api.slippSete(k.id);
         } else {
-          await Api.taSete(S.trip.id, nr);
+          await Api.taSete(k.id, nr);
         }
         await aapneSeter(true);
+        hentMegTall(true);
       } catch (err) { toast(err.message); await aapneSeter(true); }
+      return;
+    }
+
+    if (t.hasAttribute("data-nykj")) return sheetKjoretoy(null);
+    if (t.dataset.endrekj) return sheetKjoretoy(t.dataset.endrekj);
+
+    if (t.dataset.slettkj) {
+      const k = (S.setekart || []).find(x => x.id === t.dataset.slettkj);
+      if (!confirm(`Slette ${k ? k.navn : "kjøretøyet"}? Plassene alle har valgt forsvinner.`)) return;
+      try {
+        await Api.slettKjoretoy(t.dataset.slettkj);
+        closeSheet();
+        await aapneSeter(true);
+        hentMegTall(true);
+      } catch { toast("Klarte ikke slette kjøretøyet."); }
+      return;
+    }
+
+    // Adressene slås opp på serveren, og et sted som bommet i går kan
+    // treffe i dag. Uten denne knappen var eneste vei å endre adressen
+    // til noe annet og tilbake igjen.
+    if (t.hasAttribute("data-vaerigjen")) {
+      toast("Slår opp adressene…");
+      try {
+        await Api.lastVaer(S.trip.id, true);
+        await openTrip(S.trip.id);
+        S.tab = "meg"; render();
+        const igjen = oppgaver().filter(o => /Fant ikke posisjonen/.test(o.hva)).length;
+        toast(igjen ? `${igjen} står fortsatt uten posisjon.` : "Alle stedene har posisjon nå.");
+      } catch { toast("Klarte ikke slå opp. Sjekk nettet."); }
       return;
     }
     // Kommer du fra et ark eller fra programmet, må arket lukkes og
@@ -3968,8 +4185,7 @@ const UI = (() => {
     if (t.dataset.sheet === "doppchat") return sheetDoppChat(t.dataset.chat);
     if (t.dataset.sheet === "logginn") return visAuth("logginn");
     if (t.dataset.sheet === "koblepost") { closeSheet(); return visAuth("koble"); }
-    if (t.dataset.sheet === "nyttpakk") return sheetNyttPakk();
-    if (t.dataset.sheet === "seteoppsett") return sheetSeteoppsett();
+    if (t.dataset.sheet === "nyttpakk") return sheetNyttPakk(t.dataset.egen === "1");
     if (t.dataset.sheet === "skjulte") return sheetSkjulte();
     if (t.dataset.sheet === "about") return sheetAbout();
     if (t.dataset.sheet === "importpdf") return sheetImportPdf();
