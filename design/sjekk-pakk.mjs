@@ -27,12 +27,22 @@ const trykkSiste = async v => {
 };
 const antall = v => side.$$eval(v, e => e.length).catch(() => 0);
 
-/* ───── pakkelista ligger på I dag, ikke under Meg ───── */
-await sjekk("I dag har rad for pakkeliste", async () => await side.$('[data-side="pakk"]') !== null);
-await sjekk("I dag har rad for sitteplasser", async () => await side.$('[data-side="seter"]') !== null);
+/* ───── de praktiske listene ligger under Meg, ikke på I dag ─────
+   På en dag med tolv punkter sto Praktisk under bretten. «I dag» er
+   dagen; listene bor i Meg, og hjemskjermen viser bare det som venter
+   på at du gjør noe. */
+// Radene som fortsatt kan stå på I dag, er de som venter på deg. Selve
+// Praktisk-gruppa skal ikke være der.
+await sjekk("I dag har ikke Praktisk-gruppa", async () =>
+  !/PRAKTISK/i.test(await side.$eval("#screen", e => e.textContent)));
+await sjekk("I dag sier hva som venter på deg", async () =>
+  /VENTER PÅ DEG/i.test(await side.$eval("#screen", e => e.textContent)));
+await sjekk("I dag har ingen dagstripe lenger", async () => await side.$(".stripe") === null);
 await trykk('#tabbar button[data-tab="meg"]');
-await sjekk("Meg har dem ikke lenger", async () => await side.$('[data-side="pakk"]') === null);
-await trykk('#tabbar button[data-tab="idag"]');
+await sjekk("Meg har rad for pakkeliste", async () => await side.$('[data-side="pakk"]') !== null);
+await sjekk("Meg har rad for sitteplasser", async () => await side.$('[data-side="seter"]') !== null);
+await sjekk("Meg har rad for nødnummer", async () => await side.$('[data-side="kontakt"]') !== null);
+await sjekk("reiselederen har opprop", async () => await side.$('[data-side="opprop"]') !== null);
 
 /* ───── pakkeliste ───── */
 await trykk('[data-side="pakk"]');
@@ -85,10 +95,10 @@ await side.goBack();
 await side.waitForTimeout(350);
 await trykk('[data-side="seter"]');
 await sjekk("ett kort per kjøretøy", async () => await antall(".kjkort") === 3);
-await sjekk("bussen har 56 seter", async () =>
-  await side.$$eval(".kjkort", e => e[0].querySelectorAll(".setet:not(.tom)").length) === 56);
-await sjekk("flyet har 30 seter", async () =>
-  await side.$$eval(".kjkort", e => e[1].querySelectorAll(".setet:not(.tom)").length) === 30);
+await sjekk("bussen har 57 seter", async () =>
+  await side.$$eval(".kjkort", e => e[0].querySelectorAll(".setet:not(.tom)").length) === 57);
+await sjekk("toget har 32 plasser", async () =>
+  await side.$$eval(".kjkort", e => e[1].querySelectorAll(".setet:not(.tom)").length) === 32);
 await sjekk("bilen har 5 seter", async () =>
   await side.$$eval(".kjkort", e => e[2].querySelectorAll(".setet:not(.tom)").length) === 5);
 
@@ -96,14 +106,33 @@ await sjekk("bussen er fire i bredden med midtgang etter to", async () =>
   await side.$$eval(".kjkort", e =>
     [...e[0].querySelector(".seterad").children].map(x => x.className.split(" ")[0]).join(",")
   ) === "setet,setet,gang,setet,setet");
-await sjekk("flyet er seks i bredden med midtgang etter tre", async () =>
+await sjekk("toget er fire i bredden med midtgang etter to", async () =>
   await side.$$eval(".kjkort", e =>
     [...e[1].querySelector(".seterad").children].map(x => x.className.split(" ")[0]).join(",")
-  ) === "setet,setet,setet,gang,setet,setet,setet");
-await sjekk("flysetene heter A til F", async () =>
+  ) === "setet,setet,gang,setet,setet");
+/* Et tog nummererer gjennom vogna: 41, 42, 43. «11A» finnes ikke paa
+   billetten, og da skal det ikke finnes i kartet heller. */
+await sjekk("togplassene er tall, ikke rad og bokstav", async () =>
   await side.$$eval(".kjkort", e =>
-    [...e[1].querySelectorAll(".seterad")[0].querySelectorAll(".setet")].map(x => x.querySelector("b").textContent).join("")
-  ) === "1A1B1C1D1E1F");
+    [...e[1].querySelectorAll(".seterad")[0].querySelectorAll(".setet")].map(x => x.querySelector("b").textContent).join(",")
+  ) === "1,2,3,4");
+/* En buss har fem bak der resten har fire. Uten dette stemte ikke
+   setenumrene med bussen folk satt i. */
+await sjekk("bussens bakerste rad har fem, og heter 14A til 14E", async () =>
+  await side.$$eval(".kjkort", e => {
+    const rader = e[0].querySelectorAll(".seterad");
+    const siste = rader[rader.length - 1];
+    return rader.length === 14 &&
+      siste.classList.contains("bakerst") &&
+      siste.querySelectorAll(".gang").length === 0 &&
+      [...siste.querySelectorAll(".setet")].map(x => x.querySelector("b").textContent).join(",")
+        === "14A,14B,14C,14D,14E";
+  }));
+/* Plassene i en bil er steder og ikke tall: fører, foran, bak. */
+await sjekk("bilplassene heter det de heter", async () =>
+  await side.$$eval(".kjkort", e =>
+    [...e[2].querySelectorAll(".setet:not(.tom)")].map(x => x.querySelector("b").textContent).join(",")
+  ) === "Fører,Foran,Bak v.,Bak midt,Bak h.");
 await sjekk("siste rad fylles med tomrom, ikke med seter som ikke finnes", async () =>
   await side.$$eval(".kjkort", e => {
     const rader = e[2].querySelectorAll(".seterad");          // bilen: 5 plasser, 2 i bredden
@@ -112,7 +141,7 @@ await sjekk("siste rad fylles med tomrom, ikke med seter som ikke finnes", async
 
 await sjekk("min plass i bussen er markert", async () =>
   await side.$$eval(".kjkort", e => e[0].querySelectorAll(".setet.min").length) === 1);
-await sjekk("ingen plass i flyet ennå", async () =>
+await sjekk("ingen plass i toget ennå", async () =>
   await side.$$eval(".kjkort", e => e[1].querySelectorAll(".setet.min").length) === 0);
 // Et tatt sete er ikke lenger avslaatt: det er veien inn til aa spoerre
 // om aa bytte. Et sete som ikke kan trykkes sier ikke hvorfor.
@@ -133,7 +162,7 @@ await sjekk("i et laast kjoeretoy setter reiselederen hvem som sitter der", asyn
   const valg = await side.$$eval("[data-setevalg]", e => e.length);
   await side.evaluate(() => document.querySelector("[data-close]").click());
   await side.waitForTimeout(300);
-  return /1A i Bil/.test(h) && valg > 0;
+  return /Fører i Bil/.test(h) && valg > 0;
 });
 
 await sjekk("et opptatt sete viser hvem som sitter der", async () =>
@@ -151,7 +180,7 @@ await sjekk("et ledig sete har ingen navn", async () =>
     const l = e[0].querySelector(".setet:not(.tatt):not(.min):not(.tom)");
     return l && !l.querySelector("small");
   }));
-/* Ta en plass i flyet: bussplassen skal ikke røres. */
+/* Ta en plass i toget: bussplassen skal ikke røres. */
 const bussetet = () => side.$$eval(".kjkort", e => {
   const m = e[0].querySelector(".setet.min"); return m ? m.querySelector("b").textContent : null;
 });
@@ -159,7 +188,7 @@ const forBuss = await bussetet();
 await side.evaluate(() => document.querySelectorAll(".kjkort")[1]
   .querySelector(".setet:not(.tatt):not(.min):not(.tom)").click());
 await side.waitForTimeout(420);
-await sjekk("fikk plass i flyet", async () =>
+await sjekk("fikk plass i toget", async () =>
   await side.$$eval(".kjkort", e => e[1].querySelectorAll(".setet.min").length) === 1);
 await sjekk("bussplassen står urørt", async () => await bussetet() === forBuss);
 
@@ -255,7 +284,7 @@ if (addKnapp) {
 /* Dra et punkt opp i lista, med ekte pekerhendelser. */
 await side.evaluate(() => { const b = document.querySelector("[data-close]"); if (b) b.click(); });
 await side.waitForTimeout(300);
-await trykk('#tabbar button[data-tab="idag"]');
+await trykk('#tabbar button[data-tab="meg"]');
 await trykk('[data-side="pakk"]');
 const rekke = () => side.$$eval('.pkliste[data-egen="0"] .pknavn', e => e.map(x => x.textContent));
 const foerDra = await rekke();
@@ -394,6 +423,9 @@ for (const [siden, venta, hva] of [
   s7.on("dialog", d => d.accept());
   await s7.goto(`http://localhost:${process.env.PORT || 4321}/design/demo.html`, { waitUntil: "networkidle" });
   await s7.waitForSelector("#tabbar button");
+  // Listene ligger under Meg nå, ikke på I dag.
+  await s7.evaluate(() => document.querySelector('#tabbar [data-tab="meg"]').click());
+  await s7.waitForTimeout(400);
   await s7.evaluate(() => document.querySelector('[data-side="rom"]').click());
   await s7.waitForTimeout(700);
   const senger = () => s7.$$eval(".kjtopp small", e => e.map(x => x.textContent));

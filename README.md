@@ -22,6 +22,16 @@ samme som at den er fri å bruke.
   hotellet dere faktisk bor på den datoen — turer bytter hotell underveis.
 - **Program** med dagsvelger, neste hendelse, og kart på hvert punkt. Reiseleder legger inn
   dager, punkter, steder og hvilket hotell som gjelder hver dag.
+- **Praktisk** samlet under Meg: pakkeliste, sitteplasser, rom og nødnummer. «I dag» viser
+  bare det som venter på at du gjør noe.
+- **Sitteplasser** per kjøretøy, med dag, type og navngiving som følger kjøretøyet: en buss
+  heter 12A, et tog 41, en bil «Bak v.». Flere like kjøretøy lages i én omgang.
+- **Rom** med de samme to bryterne som setene: deltakerne flytter seg selv, eller
+  reiselederen fordeler — og om hvert bytte må godkjennes. «Fyll de ledige sengene»
+  fordeler resten.
+- **Nødnummer** som alle ser, også uten nett, og som ringes med ett trykk.
+- **Opprop** for reiselederne: en runde der navnene hakes av. Bare reiseledere ser den.
+- **Omvisning** første gang du åpner en tur — én for reiseledere, én for deltakere.
 - **Lys visning.** Appen er lys uansett hva telefonen står på.
 - **Offline** — appen caches, og siste turdata vises selv uten nett. Meldinger krever nett.
 
@@ -95,8 +105,9 @@ API-et møter de samme reglene.
 
 - **Navnet er selvvalgt.** Hvem som helst kan skrive «Kari Lund» og se ut som en lærer.
   Fikses med engangskode på e-post eller SMS, eller ved at reiseleder godkjenner deltakere.
-- **Turkoden er en delt hemmelighet.** Lekker den, kommer hvem som helst inn. Bør kunne
-  byttes eller stenges av reiseleder når alle er med.
+- **Turkoden er en delt hemmelighet.** Lekker den, kommer hvem som helst inn. Reiselederen
+  kan nå lage en ny kode, og da slutter den gamle å virke. Å stenge turen helt for nye
+  deltakere er fortsatt ikke mulig — men reiseleder kan kreve å godkjenne hver som blir med.
 - **Ingen automatisk sletting.** Meldinger og deltakerlister bør slettes en gitt tid etter
   turen, ikke ligge til evig tid.
 - **Ingen moderering utover sletting.** Reiseleder bør kunne stenge en chat og fjerne

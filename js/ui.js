@@ -14,6 +14,7 @@ const UI = (() => {
     vaerJobber: false,
     rom: null, romFeil: false,
     pakk: null, pakkFeil: false, setekart: null, seteFeil: false,
+    kontakt: null, kontaktFeil: false, opprop: null, oppropFeil: false,
     megTall: null,                          // tallene som står til høyre i Meg
     sideChat: null, chatFolk: null, ventende: 0, vedlegg: null, sender: false, sisteComposer: null };
 
@@ -100,6 +101,8 @@ const UI = (() => {
     info:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5"/><circle cx="12" cy="7.9" r=".9" fill="currentColor" stroke="none"/></svg>',
     sekk:'<svg viewBox="0 0 24 24"><path d="M5.5 10a6.5 6.5 0 0 1 13 0v8.5a1.5 1.5 0 0 1-1.5 1.5H7a1.5 1.5 0 0 1-1.5-1.5V10Z"/><path d="M9.2 9.2V6.4a2.8 2.8 0 0 1 5.6 0v2.8"/><path d="M9 14.5h6"/></svg>',
     sete:'<svg viewBox="0 0 24 24"><path d="M7 4.5h7.5a2 2 0 0 1 2 2.2l-.8 7.3H7.8L7 4.5Z"/><path d="M6.5 14h11.2a1.8 1.8 0 0 1 1.8 1.8v.7H6.5V14Z"/><path d="M8 16.5v3M18 16.5v3"/></svg>',
+    telefon:'<svg viewBox="0 0 24 24"><path d="M7.2 3.8h2.3l1.4 3.5-1.9 1.4a11 11 0 0 0 4.9 4.9l1.4-1.9 3.5 1.4v2.3a2.4 2.4 0 0 1-2.6 2.4A14.6 14.6 0 0 1 4.8 6.4a2.4 2.4 0 0 1 2.4-2.6Z"/></svg>',
+    opprop:'<svg viewBox="0 0 24 24"><path d="M10 6.5h10M10 12h10M10 17.5h10"/><path d="m3.5 6.3 1.4 1.4 2.3-2.4M3.5 11.8l1.4 1.4 2.3-2.4M3.5 17.3l1.4 1.4 2.3-2.4"/></svg>',
     chev:'<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>'
   };
 
@@ -388,6 +391,15 @@ const UI = (() => {
     $("avatarText").textContent = p ? p.initials : "–";
 
     render();
+
+    /* Omvisningen første gang, og bare da. Den kommer etter at appen er
+       tegnet: et ark over en tom skjerm forklarer ingenting, og det er
+       verdt å se hva det snakkes om bak det. Blir en deltaker reiseleder
+       senere, får hen reiselederens omvisning — det er en annen app å
+       bruke. */
+    if (!omvisningSett(trip.role === "leader" ? "leader" : "member")) {
+      setTimeout(() => { if (S.trip && S.trip.id === tripId && !S.side) sheetOmvisning(0); }, 700);
+    }
     appKlar();
     if (!S.offline) {
       Api.subscribeTrip(tripId);
@@ -451,26 +463,6 @@ const UI = (() => {
     const idag = trip.days.find(x => x.date === today());
     const naa = new Date().toTimeString().slice(0, 5);
 
-    /* Dagstripa: dagen som en avgangstavle. Logoens oransje prikk er
-       «nå» — merket og tidspunktet er den samme tingen. */
-    let stripe = "";
-    if (idag && idag.items.filter(i => i.t).length > 1) {
-      const med = idag.items.filter(i => i.t);
-      const naaIdx = med.findIndex(i => i.t > naa);
-      const gaatt = naaIdx < 0 ? 1 : (med.length > 1 ? naaIdx / (med.length - 1) : 0);
-      stripe = `<div class="stripe" aria-label="Dagen i oversikt">
-        <div class="akse"></div>
-        <div class="gaatt" style="transform:scaleX(${gaatt.toFixed(3)})"></div>
-        <div class="punkter">
-          ${med.map((i, k) => `
-            <div class="pk ${i.t <= naa ? "ferdig" : ""} ${k === naaIdx ? "aktiv" : ""}">
-              <span class="kl">${esc(i.t)}</span><span class="mk"></span>
-              <span class="nvn">${esc(i.title.split(/[\s,]+/)[0])}</span>
-            </div>`).join("")}
-        </div>
-      </div>`;
-    }
-
     /* Hilsenen navngir dagen og dagens ene faktum. */
     const dagnavn = idag
       ? cap(new Date(idag.date).toLocaleDateString("nb-NO", { weekday: "long" }))
@@ -522,8 +514,8 @@ const UI = (() => {
         <h1 class="daghilsen">${esc(tittel)}</h1>
         <p class="dagunder">${idag ? `Dag ${nr} av ${trip.days.length}` : esc(trip.name)}</p>
       </div>
-      ${stripe}
       ${kort}
+      ${ventePaaDeg()}
       ${senere.length ? `
         <div>
           <div class="eyebrow" style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px">
@@ -539,12 +531,70 @@ const UI = (() => {
               <span class="pil">${ICON.chev}</span></button>`;
           }).join("")}
         </div>` : ""}
-      ${praktisk()}`;
+      `;
   }
 
-  /* Pakkelista og setekartet: turens to praktiske lister. Tallene til
-     høyre hentes én gang, og raden står der uansett — en tom verdi er
-     bedre enn en rad som dukker opp etterpå og flytter alt nedover. */
+  /* ───────── det som venter på deg ─────────
+     «I dag» er dagen. Praktisk lå nederst her før, og på en dag med
+     tolv punkter sto det under bretten — man måtte vite at det var der
+     for å finne det. Listene bor nå i Meg, og dette er det eneste som
+     fortsatt hører hjemme på hjemskjermen: de tingene som venter på at
+     du gjør noe. Venter ingenting, står det ingenting. */
+  function ventePaaDeg() {
+    const tall = S.megTall;
+    if (!tall) return "";                    // ikke hentet ennå
+    const leder = S.trip.role === "leader";
+    const rader = [];
+
+    const bytter = (tall.byttSeter || 0) + (tall.byttRom || 0);
+    if (bytter) {
+      rader.push({
+        side: tall.byttSeter ? "seter" : "rom",
+        hva: `${bytter} ${bytter === 1 ? "bytte venter" : "bytter venter"} på svar`,
+        hvorfor: leder ? "Noen vil bytte plass eller rom" : "Noen har spurt deg"
+      });
+    }
+
+    const manglerSete = (tall.kjoretoy || 0) - (tall.mineSeter || 0);
+    if (manglerSete > 0) {
+      rader.push({
+        side: "seter",
+        hva: manglerSete === 1 && tall.kjoretoy === 1
+          ? "Du har ikke valgt plass" : `Du mangler plass i ${manglerSete}`,
+        hvorfor: "Sitteplasser"
+      });
+    }
+
+    // Har reiselederen fordelingen, er det ikke noe du kan gjøre, og da
+    // er det ikke noe som venter på deg heller.
+    if (tall.rom && !tall.harRom && S.trip.romFritt) {
+      rader.push({ side: "rom", hva: "Du har ikke valgt rom", hvorfor: "Rom" });
+    }
+
+    const igjen = (tall.pakkTotalt || 0) - (tall.pakkKrysset || 0);
+    if (igjen > 0) {
+      rader.push({
+        side: "pakk",
+        hva: `${igjen} ${igjen === 1 ? "ting" : "ting"} står ukrysset`,
+        hvorfor: "Pakkeliste"
+      });
+    }
+
+    if (!rader.length) return "";
+    return `<div>
+      <div class="eyebrow" style="margin-bottom:8px;color:var(--amber)">Venter på deg · ${rader.length}</div>
+      <div class="card pad" style="border-left:3px solid var(--amber)">
+        <div class="list">${rader.map(r => `<button class="listrow" data-side="${r.side}">
+          <div class="grow"><div class="nm">${esc(r.hva)}</div>
+            <div class="sub">${esc(r.hvorfor)}</div></div>
+          <span class="chev">${ICON.chev}</span></button>`).join("")}</div>
+      </div></div>`;
+  }
+
+  /* Turens praktiske lister, samlet i Meg: pakkelista, plassen din,
+     rommet ditt og nummeret man ringer. Tallene til høyre hentes én
+     gang, og raden står der uansett — en tom verdi er bedre enn en rad
+     som dukker opp etterpå og flytter alt nedover. */
   /* Med flere kjøretøy er det ikke ett setenavn å vise. Det som betyr
      noe er om du mangler en plass et sted. */
   function setetekst(tall) {
@@ -556,7 +606,7 @@ const UI = (() => {
 
   function praktisk() {
     const tall = S.megTall;
-    const trip = S.trip;
+    const leder = S.trip.role === "leader";
     return `<div>
       <div class="eyebrow" style="margin-bottom:8px">Praktisk</div>
       <div class="gruppe"><div class="list">
@@ -577,9 +627,31 @@ const UI = (() => {
         <button class="listrow" data-side="rom">
           <span class="rikon grunn">${ICON.nokkel}</span>
           <div class="grow"><div class="nm">Rom</div></div>
+          <span class="verdi">${romtekst(tall)}</span>
           <span class="chev">${ICON.chev}</span></button>
+
+        <button class="listrow" data-side="kontakt">
+          <span class="rikon gul">${ICON.telefon}</span>
+          <div class="grow"><div class="nm">Nødnummer</div>
+            <div class="sub">Hvem ringer du, og på hvilket nummer</div></div>
+          <span class="chev">${ICON.chev}</span></button>
+
+        ${leder ? `<button class="listrow" data-side="opprop">
+          <span class="rikon">${ICON.opprop}</span>
+          <div class="grow"><div class="nm">Opprop</div>
+            <div class="sub">Hak av at alle er med</div></div>
+          <span class="chev">${ICON.chev}</span></button>` : ""}
       </div></div>
     </div>`;
+  }
+
+  /* Rommet er ett navn eller ingen. Reiselederen får vite hvor mange som
+     mangler seng i stedet — det er hens spørsmål, ikke «hvor bor jeg». */
+  function romtekst(tall) {
+    if (!tall) return "";
+    if (!tall.rom) return "Ikke satt opp";
+    if (S.trip.role === "leader") return `${tall.rom} rom`;
+    return tall.harRom ? "Du har rom" : "Ikke tildelt";
   }
 
   /* ───────── varighet ─────────
@@ -1281,6 +1353,41 @@ const UI = (() => {
       });
     }
 
+    /* En dag uten punkter er sjelden en tom dag — den er en dag som ikke
+       er lagt inn ennå. Deltakeren ser «Ingen punkter denne dagen» og
+       tror det er svaret.
+
+       De tre oppgavene under kan ikke skjules: de forsvinner av seg selv
+       i samme øyeblikk som de er gjort, og et skjul-flagg for dem måtte
+       hatt en kolonne i basen å ligge i. */
+    for (const d of S.trip.days) {
+      if (d.items.length) continue;
+      ut.push({
+        hva: `${cap(d.label)} har ingen punkter`,
+        hvorfor: "Deltakerne ser en tom dag",
+        sheet: "additem", slag: "tomdag", id: d.id
+      });
+    }
+
+    /* Det som venter på en avgjørelse fra deg, og det som ikke er
+       fordelt. Tallene kommer fra Meg-tallene, så de står først når de
+       er hentet — en oppgave som gjetter er verre enn en som venter. */
+    const tall = S.megTall;
+    if (tall) {
+      const bytter = (tall.byttSeter || 0) + (tall.byttRom || 0);
+      if (bytter) ut.push({
+        hva: `${bytter} ${bytter === 1 ? "bytte" : "bytter"} venter på deg`,
+        hvorfor: "Noen vil bytte plass eller rom",
+        side: tall.byttSeter ? "seter" : "rom", slag: "bytte", id: "bytte"
+      });
+
+      if (tall.rom && tall.utenRom) ut.push({
+        hva: `${tall.utenRom} uten seng`,
+        hvorfor: "Turen har rom, men ikke alle har fått et",
+        side: "rom", slag: "utenrom", id: "utenrom"
+      });
+    }
+
     return ut;
   }
 
@@ -1397,11 +1504,15 @@ const UI = (() => {
           <div class="eyebrow" style="margin-bottom:8px;color:var(--amber)">Må ordnes · ${o.length}</div>
           <div class="card pad" style="border-left:3px solid var(--amber)">
             <div class="list">${o.map(x => `<div class="oppgave">
-              <button class="listrow" data-sheet="${x.sheet}" data-place="${esc(x.id)}" data-day="${esc(x.id)}">
+              <button class="listrow" ${x.side
+                ? `data-side="${esc(x.side)}"`
+                : `data-sheet="${esc(x.sheet)}" data-place="${esc(x.id)}" data-day="${esc(x.id)}"`}>
                 <div class="grow"><div class="nm">${esc(x.hva)}</div><div class="sub">${esc(x.hvorfor)}</div></div>
                 <span class="chev">${ICON.chev}</span>
               </button>
-              <button class="linkbtn skjulknapp" data-skjul="${esc(x.slag)}" data-skjulid="${esc(x.id)}">ikke nødvendig</button>
+              ${x.slag === "day" || x.slag === "place"
+                ? `<button class="linkbtn skjulknapp" data-skjul="${esc(x.slag)}" data-skjulid="${esc(x.id)}">ikke nødvendig</button>`
+                : ""}
             </div>`).join("")}</div>
           </div>
           ${o.some(x => /Fant ikke posisjonen/.test(x.hva))
@@ -1423,6 +1534,8 @@ const UI = (() => {
         </span>
         ${Api.erAnonym() ? '<span class="tag amber">gjest</span>' : ""}
       </div>
+
+      ${praktisk()}
 
       <div>
         <div class="eyebrow" style="margin-bottom:8px">Turen</div>
@@ -1452,6 +1565,19 @@ const UI = (() => {
             <div class="grow"><div class="nm">Turkode</div>
               <div class="sub">Trykk for å kopiere</div></div>
             <b class="mono" style="font-size:17px;letter-spacing:.09em">${esc(trip.code)}</b></button>
+
+          ${trip.role === "leader" ? `<button class="listrow" data-sheet="byttkode">
+            <span class="rikon gul">${ICON.spark}</span>
+            <div class="grow"><div class="nm">Ny turkode</div>
+              <div class="sub">Når koden har kommet ut til flere enn den skulle</div></div>
+            <span class="chev">${ICON.chev}</span></button>` : ""}
+
+          <button class="listrow" data-sheet="omvisning">
+            <span class="rikon mose">${ICON.info}</span>
+            <div class="grow"><div class="nm">Omvisning i appen</div>
+              <div class="sub">${trip.role === "leader"
+                ? "Det du som reiseleder styrer" : "Hva du finner hvor"}</div></div>
+            <span class="chev">${ICON.chev}</span></button>
         </div></div>
       </div>
 
@@ -1497,8 +1623,16 @@ const UI = (() => {
           ${trip.erEier || trip.erAdmin
             ? `<button class="listrow bar fare" data-deltrip="${esc(trip.id)}">Slett hele turen</button>` : ""}
           <button class="listrow bar fare" id="resetBtn">Logg ut på denne enheten</button>
-          <button class="listrow bar fare" id="slettKontoBtn">Slett kontoen min</button>
         </div></div>
+
+        <!-- Sletting av kontoen lå som den fjerde raden i en stabel med
+             faregrep, rett under «Logg ut». Den kan ikke angres, og en
+             som bladde nedover kunne treffe den i farta. Nå ligger den
+             bak et ark som forteller hva som skjer før man kan trykke. -->
+        <p style="text-align:center;margin:14px 0 0;font-size:14px;color:var(--ink-3)">
+          <button type="button" class="linkbtn" data-sheet="slettkonto"
+            style="color:var(--ink-3)">Slett kontoen min</button>
+        </p>
       </div>`;
   }
 
@@ -1521,7 +1655,8 @@ const UI = (() => {
 
     if (side) {
       const sidenavn = { deltakere: "Deltakere og roller", varsler: "Varsler", chat: "Om chatten", rom: "Rom",
-                         pakk: "Pakkeliste", seter: "Sitteplasser" };
+                         pakk: "Pakkeliste", seter: "Sitteplasser",
+                         kontakt: "Nødnummer", opprop: "Opprop" };
       $("convName").textContent = sidenavn[side] || "";
       $("convSub").textContent = S.trip.name;
     } else if (conv) {
@@ -1574,6 +1709,8 @@ const UI = (() => {
                           : side === "pakk" ? viewPakk()
                           : side === "seter" ? viewSeter()
                           : side === "rom" ? viewRom()
+                          : side === "kontakt" ? viewKontakt()
+                          : side === "opprop" ? viewOpprop()
                           : side === "deltakere" ? viewDeltakere()
                           : visningFor(S.tab);
     if (side === "varsler") settOppVarsler();
@@ -1674,19 +1811,6 @@ const UI = (() => {
         const marg = 14;
         if (v.left < c.left + marg) chipsEtter.scrollLeft -= (c.left + marg) - v.left;
         else if (v.right > c.right - marg) chipsEtter.scrollLeft += v.right - (c.right - marg);
-      }
-    }
-
-    // Dagstripa blas sidelengs når dagen har mange punkter. Da skal nå
-    // være synlig uten at man må dra, ellers ser dagen tom ut.
-    const stripa = $("screen").querySelector(".stripe .punkter");
-    if (stripa) {
-      const naa = stripa.querySelector(".pk.aktiv") || stripa.querySelector(".pk:not(.ferdig)");
-      if (naa) {
-        const v = naa.getBoundingClientRect(), c = stripa.getBoundingClientRect();
-        const marg = 20;
-        if (v.left < c.left + marg) stripa.scrollLeft -= (c.left + marg) - v.left;
-        else if (v.right > c.right - marg) stripa.scrollLeft += v.right - (c.right - marg);
       }
     }
 
@@ -3013,21 +3137,97 @@ const UI = (() => {
   /* ───────── pakkeliste og sitteplasser ─────────
      Begge er egne sider, ikke ark: lista blir lang, og et setekart man
      skal sikte på er dårlig å ha i noe som kan dras ned. */
-  /* En tur sitter ikke på én måte. Ned med fly, hjem med tog, og to
-     busser mellom — hvert kjøretøy har sin egen bredde og sin egen
+  /* En tur sitter ikke på én måte. Buss ned, tog hjem, og noen biler
+     ved siden av — hvert kjøretøy har sin egen bredde og sin egen
      midtgang, og derfor sitt eget kart. Typen er det eneste vi spør
      om; resten følger av den. */
+  /* Typen bestemmer tre ting: hvor bredt kartet står, hvor midtgangen
+     går, og hva en plass heter.
+
+     Navngivingen er ikke pynt. En buss nummererer radvis — 12C er rad 12,
+     tredje sete. Et tog gjør det ikke: der står plassene 41, 42, 43
+     gjennom hele vogna, og «11A» finnes ikke på billetten. I en bil er
+     plassen et sted og ikke et nummer: fører, foran, bak til venstre.
+     Sto det 2B på et bilsete, måtte alle oversette selv.
+
+     Fly og båt fantes før og er tatt ut: setet på et fly deles ut av
+     flyselskapet, og det er ingenting en deltaker kan velge i appen.
+     Skal det inn igjen en gang, er det som en liste og ikke som et kart.
+     En rad i basen med en type vi ikke kjenner, tegnes som «Annet». */
   const TYPER = {
-    buss:     { navn: "Buss",     bredde: 4, gang: 2 },
-    minibuss: { navn: "Minibuss", bredde: 3, gang: 1 },
-    bil:      { navn: "Bil",      bredde: 2, gang: 1 },
-    tog:      { navn: "Tog",      bredde: 4, gang: 2 },
-    fly:      { navn: "Fly",      bredde: 6, gang: 3 },
-    baat:     { navn: "Båt",      bredde: 4, gang: 2 },
-    annet:    { navn: "Annet",    bredde: 4, gang: 0 }
+    buss:     { navn: "Buss",     bredde: 4, gang: 2, navngiving: "rad" },
+    minibuss: { navn: "Minibuss", bredde: 3, gang: 1, navngiving: "rad" },
+    bil:      { navn: "Bil",      bredde: 2, gang: 1, navngiving: "bil" },
+    tog:      { navn: "Tog (vogn)", bredde: 4, gang: 2, navngiving: "nummer" },
+    annet:    { navn: "Annet",    bredde: 4, gang: 0, navngiving: "rad" }
   };
   const oppsett = typ => TYPER[typ] || TYPER.annet;
-  const setenavn = (nr, bredde) => Math.ceil(nr / bredde) + "ABCDEF"[(nr - 1) % bredde];
+
+  /* Plassene i en bil, i den rekkefølgen de ligger: fører og passasjer
+     foran, så bakover. Er bilen større enn fem, faller den tilbake til
+     tall — en sjuseter har ingen navn alle er enige om. */
+  const BILPLASS = ["Fører", "Foran", "Bak v.", "Bak midt", "Bak h."];
+
+  /* Navnet på hver plass i ett kjøretøy. Det regnes ut fra radene og
+     ikke fra plassnummeret alene: har bussen fem bak, ligger plass 57 i
+     rad 14 og heter 14E — nr/bredde ville sagt rad 15, som ikke finnes.
+
+     Kartet lages per tegning og huskes på kjøretøyet, så et setekart med
+     femti plasser ikke regner det ut femti ganger. */
+  const navnekart = new WeakMap();
+
+  function plassnavn(k, nr) {
+    let kart = navnekart.get(k);
+    if (!kart) {
+      const o = oppsett(k.typ);
+      kart = new Map();
+      seteRader(k).forEach((rad, r) => {
+        for (let c = 0; c < rad.antall; c++) {
+          const n = rad.fra + c;
+          kart.set(n,
+            o.navngiving === "nummer" ? String(n)
+            : o.navngiving === "bil" ? (BILPLASS[n - 1] || "Plass " + n)
+            : (r + 1) + "ABCDEFG"[Math.min(c, 6)]);
+        }
+      });
+      navnekart.set(k, kart);
+    }
+    return kart.get(nr) || String(nr);
+  }
+
+  /* Plassen i klartekst der den står alene i en setning: «sete 12C»,
+     «plass 41», «bak h.». Uten dette ville en knapp sagt «Be om Fører». */
+  function plassOmtale(nr, k) {
+    const o = oppsett(k.typ);
+    const navn = plassnavn(k, nr);
+    if (o.navngiving === "bil") return navn.toLowerCase();
+    if (o.navngiving === "nummer") return "plass " + navn;
+    return "sete " + navn;
+  }
+
+  /* Hvilken rad et sete ligger i, når den siste raden er bredere enn de
+     andre. En buss har fem bak der resten har fire, og regner man bare
+     nr/bredde, stemmer ikke numrene med bussen folk sitter i. */
+  function seteRader(k) {
+    const o = oppsett(k.typ);
+    // «bakerst» er hvor mange flere plasser den siste raden har enn
+    // bredden. En buss med fem bak har bakerst = 1.
+    const ekstra = k.bakerst || 0;
+    const bakRad = ekstra ? o.bredde + ekstra : 0;
+    // Får ikke den brede raden plass, finnes den ikke: ett tall kan ikke
+    // beskrive en buss med fire plasser og fem bakerst.
+    const vanlige = bakRad && k.plasser > bakRad ? k.plasser - bakRad : k.plasser;
+    const rader = [];
+    for (let n = 1; n <= vanlige; n += o.bredde) {
+      rader.push({ fra: n, antall: Math.min(o.bredde, vanlige - n + 1), bredde: o.bredde });
+    }
+    if (vanlige < k.plasser) {
+      // Den brede bakerste raden har ingen midtgang: der sitter man på rad.
+      rader.push({ fra: vanlige + 1, antall: k.plasser - vanlige,
+                   bredde: k.plasser - vanlige, bakerst: true });
+    }
+    return rader;
+  }
 
   /* Det er plass til ett ord i et sete. Fornavnet er det som skiller
      folk fra hverandre i en klasse, og det er det man leter etter. */
@@ -3054,6 +3254,24 @@ const UI = (() => {
     if (S.side === "rom") render();
   }
 
+  async function aapneKontakt(fraHistorikk) {
+    S.side = "kontakt"; S.kontakt = null; S.kontaktFeil = false;
+    if (!fraHistorikk) history.pushState({ side: "kontakt" }, "");
+    render();
+    try { S.kontakt = await Api.kontakter(S.trip.id); }
+    catch { S.kontakt = { liste: [] }; S.kontaktFeil = true; }
+    if (S.side === "kontakt") render();
+  }
+
+  async function aapneOpprop(fraHistorikk) {
+    S.side = "opprop"; S.opprop = null; S.oppropFeil = false;
+    if (!fraHistorikk) history.pushState({ side: "opprop" }, "");
+    render();
+    try { S.opprop = await Api.opprop(S.trip.id); }
+    catch { S.opprop = { runde: null, folk: [] }; S.oppropFeil = true; }
+    if (S.side === "opprop") render();
+  }
+
   async function aapneSeter(fraHistorikk) {
     S.side = "seter"; S.setekart = null; S.seteFeil = false;
     if (!fraHistorikk) history.pushState({ side: "seter" }, "");
@@ -3073,7 +3291,7 @@ const UI = (() => {
     if (S.pakkFeil) return '<p class="muted">Klarte ikke hente pakkelista. Sjekk nettet og prøv igjen.</p>';
     if (!liste) return venter("Henter pakkelista");
 
-    const alle = liste.felles.concat(liste.egne);
+    const alle = (liste.felles || []).concat(liste.egne || []);
     const klart = alle.filter(p => p.kryss).length;
 
     const rad = (p, egen) => `<div class="pkrad" data-pid="${esc(p.id)}">
@@ -3095,6 +3313,7 @@ const UI = (() => {
       ${knapp}</div>`;
 
     return `
+      ${utenNett(liste)}
       <p class="muted" style="margin:0">${alle.length
         ? `${klart} av ${alle.length} klart. Det du krysser av er ditt — ingen andre ser det.`
         : leder ? "Lag lista her. Alle på turen ser punktene og krysser av for seg selv."
@@ -3129,16 +3348,44 @@ const UI = (() => {
       : "";
 
     if (!kart.length) return `
+      ${utenNett(S.setekart)}
       <p class="muted" style="margin:0">${leder
         ? "Legg inn hvert kjøretøy turen bruker. Har dere buss ned og tog hjem, er det to oppsett — og én plass i hvert."
         : "Reiselederen har ikke satt opp noe setekart ennå."}</p>
       ${nyknapp}`;
 
     return `
+      ${utenNett(S.setekart)}
       ${bytteliste(kart, leder)}
       ${toppTekst(kart, leder)}
-      ${kart.map(k => kjoretoykort(k, leder)).join("")}
+      ${kjoretoygrupper(kart, leder)}
       ${nyknapp}`;
+  }
+
+  /* Kjøretøyene står under dagen de går. «Buss ned» og «Buss hjem» var
+     to kart uten noe som sa når, og deltakeren måtte selv vite hvilket
+     som gjaldt i dag. Dagens står først og er åpen; resten står under
+     sine datoer. Har ingen av dem en dato, er det ingen gruppe å vise og
+     lista står som før. */
+  function kjoretoygrupper(kart, leder) {
+    if (!kart.some(k => k.dato)) return kart.map(k => kjoretoykort(k, leder)).join("");
+
+    const datoer = Array.from(new Set(kart.map(k => k.dato).filter(Boolean))).sort();
+    const grupper = datoer.map(d => ({ dato: d, kart: kart.filter(k => k.dato === d) }));
+    const utenDato = kart.filter(k => !k.dato);
+    if (utenDato.length) grupper.push({ dato: null, kart: utenDato });
+
+    // I dag først: det er det ene spørsmålet noen stiller setekartet
+    // mens turen går.
+    grupper.sort((a, b) => (b.dato === today()) - (a.dato === today()));
+
+    return grupper.map(g => `<div>
+      <div class="eyebrow" style="margin-bottom:8px${g.dato === today() ? ";color:var(--blue-ink)" : ""}">${
+        g.dato === null ? "Hele turen"
+        : g.dato === today() ? "I dag"
+        : esc(cap(Api.fmtDay(g.dato).label))}</div>
+      ${g.kart.map(k => kjoretoykort(k, leder)).join("")}
+    </div>`).join("");
   }
 
   function toppTekst(kart, leder) {
@@ -3158,9 +3405,8 @@ const UI = (() => {
   function bytteliste(kart, leder) {
     const rader = [];
     for (const k of kart) {
-      const bredde = oppsett(k.typ).bredde;
       for (const x of k.bytter) {
-        const plass = setenavn(x.nr, bredde);
+        const plass = plassnavn(k, x.nr);
         if (x.tilMeg && x.status === "venter_andre") {
           rader.push({
             hva: `${esc(x.fra)} vil bytte til plassen din ${plass} i ${esc(k.navn)}`,
@@ -3205,34 +3451,42 @@ const UI = (() => {
     const o = oppsett(k.typ);
     const tatt = new Map(k.seter.map(s2 => [s2.nr, s2]));
     const mitt = k.seter.find(s2 => s2.meg);
-    const rader = Math.ceil(k.plasser / o.bredde);
     const spurt = new Set(k.bytter.map(x => x.nr));
 
-    const rad = r => {
+    const rad = (r, i) => {
       const ut = [];
-      for (let c = 0; c < o.bredde; c++) {
-        const nr = r * o.bredde + c + 1;
-        if (o.gang && c === o.gang) ut.push('<span class="gang" aria-hidden="true"></span>');
-        if (nr > k.plasser) { ut.push('<span class="setet tom" aria-hidden="true"></span>'); continue; }
+      for (let c = 0; c < r.antall; c++) {
+        const nr = r.fra + c;
+        // Midtgangen tegnes som et tomrom i raden, ikke som et sete —
+        // ellers teller man feil når man leter etter 12C. Den brede
+        // bakerste raden har ingen midtgang.
+        if (o.gang && !r.bakerst && c === o.gang) ut.push('<span class="gang" aria-hidden="true"></span>');
         const s2 = tatt.get(nr), min = Boolean(s2 && s2.meg);
-        const plass = setenavn(nr, o.bredde);
+        const plass = plassnavn(k, nr);
         const hvem = min ? "Deg" : s2 ? fornavn(s2.hvem) : "";
         // Et sete kan trykkes av alle nå: reiselederen for å sette noen
         // der, deltakeren for å ta det eller spørre om det. Et sete som
         // ikke kan trykkes gir ingen beskjed om hvorfor.
-        ut.push(`<button class="setet ${min ? "min" : s2 ? "tatt" : ""}${spurt.has(nr) ? " spurt" : ""}"
+        // Et ord står ikke der et nummer står: «Bak midt» trenger to
+        // linjer og mindre skrift enn «12C».
+        ut.push(`<button class="setet ${min ? "min" : s2 ? "tatt" : ""}${spurt.has(nr) ? " spurt" : ""}${
+          o.navngiving === "bil" ? " ord" : ""}"
           data-sete="${nr}" data-kj="${esc(k.id)}"
-          aria-label="${plass} i ${esc(k.navn)} — ${s2 ? esc(min ? "deg" : s2.hvem) : "ledig"}${
+          aria-label="${esc(plass)} i ${esc(k.navn)} — ${s2 ? esc(min ? "deg" : s2.hvem) : "ledig"}${
             spurt.has(nr) ? ", noen har spurt om den" : ""}"
-          ><b>${plass}</b>${hvem ? `<small>${esc(hvem)}</small>` : ""}</button>`);
+          ><b>${esc(plass)}</b>${hvem ? `<small>${esc(hvem)}</small>` : ""}</button>`);
       }
-      return `<div class="seterad">${ut.join("")}</div>`;
+      // Er raden kortere enn de over, fylles den ut så setene står i
+      // kolonne. En rad som flyter fritt ser ut som en annen rad.
+      const full = r.bakerst ? r.antall : r.bredde;
+      for (let n = r.antall; n < full; n++) ut.push('<span class="setet tom" aria-hidden="true"></span>');
+      return `<div class="seterad${r.bakerst ? " bakerst" : ""}">${ut.join("")}</div>`;
     };
 
     // Din plass hører til i undertittelen, ikke i en egen kolonne: med et
     // langt kjøretøynavn ble de tre tingene stående og slåss om bredden.
     const status = mitt
-      ? `du har ${setenavn(mitt.nr, o.bredde)}`
+      ? `du har ${plassnavn(k, mitt.nr)}`
       : `${k.seter.length} tatt`;
     const maate = k.fritt ? "alle velger selv" : "reiselederen fordeler";
 
@@ -3253,7 +3507,7 @@ const UI = (() => {
             <div class="sub">Av: det holder at den andre sier ja.</div></div>
           <input type="checkbox" class="bryter" data-kjgodkjenn="${esc(k.id)}" ${k.godkjenn ? "checked" : ""}></label>
       </div></div>` : ""}
-      <div class="setekart">${Array.from({ length: rader }, (_, r) => rad(r)).join("")}</div>
+      <div class="setekart">${seteRader(k).map(rad).join("")}</div>
     </div>`;
   }
 
@@ -3265,12 +3519,14 @@ const UI = (() => {
     if (S.romFeil) return '<p class="muted">Klarte ikke hente romfordelingen. Sjekk nettet og prøv igjen.</p>';
     if (!S.rom) return venter("Henter romfordelingen");
     const { rom, alle } = S.rom;
+    const bytter = S.rom.bytter || [];
 
     const nyknapp = leder
       ? `<button class="btn big" data-nyttrom="1">Legg til rom</button>`
       : "";
 
     if (!rom.length) return `
+      ${utenNett(S.rom)}
       <p class="muted" style="margin:0">${leder
         ? "Legg inn rommene, så fordeler du folk på dem. Alle ser hvem de bor med."
         : "Reiselederen har ikke satt opp rom ennå."}</p>
@@ -3280,10 +3536,17 @@ const UI = (() => {
     const mitt = rom.find(r => r.folk.some(p => p.meg));
 
     return `
+      ${utenNett(S.rom)}
+      ${rombytteliste(bytter, leder)}
       <p class="muted" style="margin:0">${mitt
-        ? `Du bor på <b>${esc(mitt.navn)}</b>.`
+        ? `Du bor på <b>${esc(mitt.navn)}</b>.${S.trip.romFritt && !leder
+            ? " Trykk på et annet rom for å spørre om å flytte." : ""}`
         : leder ? `${rom.length} rom · ${uten.length} uten seng.`
-                : "Du har ikke fått rom ennå."}</p>
+                : S.trip.romFritt
+                  ? "Du har ikke rom ennå. Trykk på et rom med ledig seng."
+                  : "Du har ikke fått rom ennå."}</p>
+
+      ${leder ? romvalg() : ""}
 
       ${leder && uten.length ? `<div>
         <div class="eyebrow" style="margin-bottom:8px;color:var(--amber)">Uten seng · ${uten.length}</div>
@@ -3292,26 +3555,280 @@ const UI = (() => {
             <span>${esc(p.navn)}${p.leder ? ' <em>reiseleder</em>' : ""}</span>
             <button class="linkbtn" data-settrom="${esc(p.id)}">gi rom</button>
           </div>`).join("")}</div>
+          <button class="btn" style="width:100%;margin-top:10px" data-fyllalle="1">Fyll de ledige sengene</button>
         </div></div>` : ""}
 
-      ${rom.map(r => `<div class="kjkort">
-        <div class="kjtopp">
-          <div class="grow"><b>${esc(r.navn)}</b>
-            <small>${r.folk.length} av ${r.plasser} senger</small></div>
-          ${leder ? `<button class="minibtn" data-endrerom="${esc(r.id)}"
-            aria-label="Endre ${esc(r.navn)}">${ICON.blyant}</button>` : ""}
-        </div>
-        ${r.folk.length
-          ? `<div class="memberlist">${r.folk.map(p => `<div class="person">
-              <span>${esc(p.navn)}${p.meg ? " <em>deg</em>" : ""}</span>
-              ${leder ? `<button class="linkbtn" data-utavrom="${esc(p.id)}">ta ut</button>` : ""}
-            </div>`).join("")}</div>`
-          : `<p class="muted" style="margin:0">Ingen her ennå.</p>`}
-        ${leder && r.folk.length < r.plasser
-          ? `<button class="btn" style="width:100%;margin-top:10px" data-fyllrom="${esc(r.id)}">Legg til noen</button>`
-          : ""}
-      </div>`).join("")}
+      ${romgrupper(rom, leder, bytter)}
       ${nyknapp}`;
+  }
+
+  /* Rommene står under hotellet de hører til. En tur med to hoteller
+     hadde én flat liste før, og reiselederen måtte skrive hotellet inn i
+     romnavnet selv. Har turen bare ett hotell — eller ingen som er satt —
+     er det ingen gruppe å vise, og lista står som før. */
+  function romgrupper(rom, leder, bytter) {
+    const steder = Array.from(new Set(rom.map(r => r.sted).filter(Boolean)));
+    if (steder.length < 2) return rom.map(r => romkort(r, leder, bytter)).join("");
+
+    const navnet = id => {
+      const p = S.trip.places[id];
+      return p ? p.name : "Annet hotell";
+    };
+    const grupper = steder.map(s => ({ navn: navnet(s), rom: rom.filter(r => r.sted === s) }));
+    const uten = rom.filter(r => !r.sted);
+    if (uten.length) grupper.push({ navn: "Uten hotell", rom: uten });
+
+    return grupper.map(g => `<div>
+      <div class="eyebrow" style="margin-bottom:8px">${esc(g.navn)} · ${g.rom.length} rom</div>
+      ${g.rom.map(r => romkort(r, leder, bytter)).join("")}
+    </div>`).join("");
+  }
+
+  /* Ett rom. For reiselederen er det en liste å fordele i; for deltakeren
+     er det et sted man kan spørre om — men bare når reiselederen har
+     åpnet for det. Er rommet fullt, er det en person man spør, ikke en
+     seng: ellers hadde noen blitt stående uten. */
+  function romkort(r, leder, bytter) {
+    const fritt = S.trip.romFritt;
+    const mitt = r.folk.some(p => p.meg);
+    const ledig = r.folk.length < r.plasser;
+    const spurt = bytter.some(x => x.rom === r.id);
+    const kanSpoerre = fritt && !leder && !mitt;
+    // Har du ikke rom selv, har du ingenting å bytte bort, og den du
+    // byttet med ville blitt stående uten seng. Da er det bare de ledige
+    // sengene å be om.
+    const jeg = (S.rom.alle || []).find(p => p.meg);
+    const kanBytte = kanSpoerre && Boolean(jeg && jeg.rom);
+
+    return `<div class="kjkort${spurt ? " spurt" : ""}">
+      <div class="kjtopp">
+        <div class="grow"><b>${esc(r.navn)}</b>
+          <small>${r.folk.length} av ${r.plasser} senger${mitt ? " · du bor her" : ""}</small></div>
+        ${leder ? `<button class="minibtn" data-endrerom="${esc(r.id)}"
+          aria-label="Endre ${esc(r.navn)}">${ICON.blyant}</button>` : ""}
+      </div>
+      ${r.folk.length
+        ? `<div class="memberlist">${r.folk.map(p => `<div class="person">
+            <span>${esc(p.navn)}${p.meg ? " <em>deg</em>" : ""}</span>
+            ${leder ? `<button class="linkbtn" data-utavrom="${esc(p.id)}">ta ut</button>`
+              : kanBytte ? `<button class="linkbtn" data-bytterom="${esc(r.id)}"
+                  data-person="${esc(p.id)}">bytt med</button>` : ""}
+          </div>`).join("")}</div>`
+        : `<p class="muted" style="margin:0">Ingen her ennå.</p>`}
+      ${leder && ledig
+        ? `<button class="btn" style="width:100%;margin-top:10px" data-fyllrom="${esc(r.id)}">Legg til noen</button>`
+        : ""}
+      ${kanSpoerre && ledig
+        ? `<button class="btn" style="width:100%;margin-top:10px" data-bytterom="${esc(r.id)}">Be om ledig seng</button>`
+        : ""}
+    </div>`;
+  }
+
+  /* De samme to bryterne kjøretøyene har, men på turen: et bytte går
+     mellom to rom, og én bryter per rom ville gitt to svar på samme
+     spørsmål. */
+  function romvalg() {
+    return `<div class="gruppe"><div class="list">
+      <label class="listrow" style="cursor:pointer">
+        <div class="grow"><div class="nm">Deltakerne kan flytte seg selv</div>
+          <div class="sub">Av: bare du setter hvem som bor hvor.</div></div>
+        <input type="checkbox" class="bryter" data-romfritt="1" ${S.trip.romFritt ? "checked" : ""}></label>
+      <label class="listrow" style="cursor:pointer">
+        <div class="grow"><div class="nm">Jeg må godkjenne bytter</div>
+          <div class="sub">Av: det holder at den andre sier ja.</div></div>
+        <input type="checkbox" class="bryter" data-romgodkjenn="1" ${S.trip.romGodkjenn ? "checked" : ""}></label>
+    </div></div>`;
+  }
+
+  /* Forespørsler om rombytte. Samme form som for setene, og av samme
+     grunn: det som venter på et svar fra deg skal stå øverst, ikke
+     gjemt inne i et romkort som ser litt annerledes ut enn de andre. */
+  function rombytteliste(bytter, leder) {
+    const rader = [];
+    const romnavn = id => {
+      const r = (S.rom.rom || []).find(x => x.id === id);
+      return r ? r.navn : "rommet";
+    };
+    for (const x of bytter) {
+      if (x.tilMeg && x.status === "venter_andre") {
+        rader.push({
+          hva: `${esc(x.fra)} vil bytte rom med deg`,
+          under: `Du får ${esc(x.fraRom || "rommet deres")}.${S.trip.romGodkjenn
+            ? " Sier du ja, går den videre til reiselederen." : " Sier du ja, er byttet gjort."}`,
+          knapper: `<button class="btn primary" data-svarrombytte="${esc(x.id)}" data-ja="1">Ja</button>
+                    <button class="btn" data-svarrombytte="${esc(x.id)}">Nei</button>`
+        });
+      } else if (leder && x.status === "venter_leder") {
+        rader.push({
+          hva: `${esc(x.fra)} vil inn på ${esc(romnavn(x.rom))}`,
+          under: x.til ? `${esc(x.til)} har sagt ja til å bytte.` : "Det står en seng ledig.",
+          knapper: `<button class="btn primary" data-avgjorrombytte="${esc(x.id)}" data-ja="1">Godkjenn</button>
+                    <button class="btn" data-avgjorrombytte="${esc(x.id)}">Avslå</button>`
+        });
+      } else if (x.fraMeg) {
+        rader.push({
+          hva: `Du har spurt om ${esc(romnavn(x.rom))}`,
+          under: x.status === "venter_andre"
+            ? `Venter på svar fra ${esc(x.til || "den som bor der")}.`
+            : "Venter på reiselederen.",
+          knapper: `<button class="btn" data-trekkrombytte="${esc(x.id)}">Trekk</button>`
+        });
+      }
+    }
+    if (!rader.length) return "";
+    return `<div>
+      <div class="eyebrow" style="margin-bottom:8px;color:var(--amber)">Bytter · ${rader.length}</div>
+      <div class="card pad" style="border-left:3px solid var(--amber)">
+        ${rader.map(r => `<div class="bytterad">
+          <div class="nm">${r.hva}</div>
+          <div class="sub">${r.under}</div>
+          <div class="byttevalg">${r.knapper}</div>
+        </div>`).join("")}
+      </div></div>`;
+  }
+
+  /* Listene som tåler å stå uten nett sier det selv. Uten denne linja
+     ville en gammel kopi sett ut som sannheten. */
+  function utenNett(data) {
+    if (!data || !data.lagret) return "";
+    return `<p class="bareledere">${ICON.info} Uten nett. Dette er listen slik den var sist du hadde dekning.</p>`;
+  }
+
+  /* ───────────────── nødnummer ─────────────────
+     Det eneste i appen noen kommer til å lete etter i en situasjon der
+     det haster. Derfor: ingen innpakning, nummeret står som en lenke
+     man ringer med ett trykk, og lista ligger lagret så den er der uten
+     dekning også.
+
+     Nummeret skrives som reiselederen skrev det. Vi renser bare bort det
+     telefonen ikke tåler i en tel:-lenke. */
+  function viewKontakt() {
+    const leder = S.trip.role === "leader";
+    if (S.kontaktFeil) return '<p class="muted">Klarte ikke hente nummerene. Sjekk nettet og prøv igjen.</p>';
+    if (!S.kontakt) return venter("Henter nummerene");
+    const liste = S.kontakt.liste || [];
+
+    const nyknapp = leder
+      ? `<button class="btn big" data-nykontakt="1">Legg til nummer</button>` : "";
+
+    if (!liste.length) return `
+      ${utenNett(S.kontakt)}
+      <p class="muted" style="margin:0">${leder
+        ? "Legg inn deg selv, den andre reiselederen og nummeret til skolen. Alle på turen ser dem, også uten nett."
+        : "Reiselederen har ikke lagt inn noen nummer ennå."}</p>
+      ${nyknapp}`;
+
+    return `
+      ${utenNett(S.kontakt)}
+      <p class="muted" style="margin:0">Trykk på et nummer for å ringe.</p>
+      <div class="gruppe"><div class="list">
+        ${liste.map(c => `<a class="listrow" href="tel:${esc(telnummer(c.telefon))}">
+          <span class="rikon gul">${ICON.telefon}</span>
+          <div class="grow"><div class="nm">${esc(c.navn)}</div>
+            <div class="sub">${esc([c.rolle, c.telefon, c.notat].filter(Boolean).join(" · "))}</div></div>
+          ${leder ? "" : `<span class="chev">${ICON.chev}</span>`}
+        </a>${leder ? `<div class="kontaktrad">
+          <button class="linkbtn" data-endrekontakt="${esc(c.id)}">endre</button>
+          <button class="linkbtn fare" data-slettkontakt="${esc(c.id)}">slett</button>
+        </div>` : ""}`).join("")}
+      </div></div>
+      ${nyknapp}`;
+  }
+
+  /* En tel:-lenke tåler tall, pluss og noen skilletegn. Mellomrom og
+     parenteser som folk skriver nummer med, må bort. */
+  const telnummer = t => String(t || "").replace(/[^\d+*#]/g, "");
+
+  function sheetKontakt(id) {
+    const c = id && ((S.kontakt || {}).liste || []).find(x => x.id === id);
+    openSheet(`<h3>${c ? "Endre nummer" : "Nytt nummer"}</h3>
+      <p class="lede">Alle på turen ser dette, også uten nett.</p>
+      <form id="koForm">
+        <div class="field"><label for="koNavn">Navn</label>
+          <input id="koNavn" type="text" maxlength="60" placeholder="Kari Lund"
+            value="${c ? esc(c.navn) : ""}" autocomplete="off"></div>
+        <div class="field"><label for="koRolle">Rolle</label>
+          <input id="koRolle" type="text" maxlength="40" placeholder="Reiseleder"
+            value="${c ? esc(c.rolle) : ""}" autocomplete="off"></div>
+        <div class="field"><label for="koTlf">Telefon</label>
+          <input id="koTlf" type="tel" maxlength="30" inputmode="tel" placeholder="+47 900 00 000"
+            value="${c ? esc(c.telefon) : ""}" autocomplete="off"></div>
+        <div class="field"><label for="koNotat">Notat</label>
+          <input id="koNotat" type="text" maxlength="200" placeholder="Ring denne først"
+            value="${c ? esc(c.notat) : ""}" autocomplete="off"></div>
+        <p class="err" id="koErr" hidden></p>
+        <button class="btn primary big" type="submit" id="koLagre">Lagre</button>
+      </form>
+      <button class="btn close" data-close>Avbryt</button>`);
+
+    $("koForm").addEventListener("submit", async e => {
+      e.preventDefault();
+      const err = $("koErr"), btn = $("koLagre");
+      const felter = {
+        navn: $("koNavn").value.trim(), rolle: $("koRolle").value.trim(),
+        telefon: $("koTlf").value.trim(), notat: $("koNotat").value.trim()
+      };
+      if (!felter.navn) { err.textContent = "Skriv et navn."; err.hidden = false; return; }
+      if (telnummer(felter.telefon).length < 3) {
+        err.textContent = "Skriv et telefonnummer."; err.hidden = false; return;
+      }
+      btn.disabled = true; btn.textContent = "Lagrer…";
+      try {
+        if (c) await Api.endreKontakt(c.id, felter);
+        else await Api.nyKontakt(S.trip.id, felter);
+        closeSheet();
+        await aapneKontakt(true);
+      } catch (e2) {
+        btn.disabled = false; btn.textContent = "Lagre";
+        err.textContent = e2.message; err.hidden = false;
+      }
+    });
+  }
+
+  /* ───────────────── opprop ─────────────────
+     Førti elever på en rasteplass. En runde åpnes, navnene hakes av, og
+     den lukkes. Bare reiseledere ser den: hvem som mangler er ikke noe
+     hele bussen skal sitte og følge med på.
+
+     De som ikke er haket av står øverst. Det er de man leter etter — og
+     mot slutten av en runde er det de to siste navnene som betyr noe,
+     ikke de trettiåtte som er på plass. */
+  function viewOpprop() {
+    if (S.oppropFeil) return '<p class="muted">Klarte ikke hente oppropet. Sjekk nettet og prøv igjen.</p>';
+    if (!S.opprop) return venter("Henter oppropet");
+    const { runde, folk } = S.opprop;
+
+    if (!runde) return `
+      <p class="muted" style="margin:0">Et opprop er en runde: du haker av hvert navn,
+        og lukker den når alle er med. Ingen andre enn reiselederne ser den.</p>
+      <button class="btn primary big" data-nyttopprop="1">Start et opprop</button>`;
+
+    const mangler = folk.filter(p => !p.her);
+    const her = folk.filter(p => p.her);
+    const rad = p => `<div class="person">
+      <button class="pkhake ${p.her ? "av" : ""}" data-hake="${esc(p.id)}"
+        aria-pressed="${p.her}" aria-label="${p.her ? "Fjern haken for" : "Hak av"} ${esc(p.navn)}"
+        >${p.her ? ICON.hake : ""}</button>
+      <span class="grow">${esc(p.navn)}${p.leder ? ' <em>reiseleder</em>' : ""}</span>
+    </div>`;
+
+    return `
+      <p class="muted" style="margin:0">${her.length} av ${folk.length} er med${
+        runde.navn ? ` · ${esc(runde.navn)}` : ""}.</p>
+
+      ${mangler.length ? `<div>
+        <div class="eyebrow" style="margin-bottom:8px;color:var(--amber)">Mangler · ${mangler.length}</div>
+        <div class="card pad" style="border-left:3px solid var(--amber)">
+          <div class="memberlist opprop">${mangler.map(rad).join("")}</div>
+        </div></div>` : `<div class="card pad" style="border-left:3px solid var(--moss)">
+          <p class="muted" style="margin:0">Alle er med.</p></div>`}
+
+      ${her.length ? `<div>
+        <div class="eyebrow" style="margin-bottom:8px;color:var(--moss)">Med · ${her.length}</div>
+        <div class="gruppe"><div class="memberlist opprop" style="padding:4px 14px">${her.map(rad).join("")}</div></div>
+      </div>` : ""}
+
+      <button class="btn big" data-lukkopprop="${esc(runde.id)}">Avslutt oppropet</button>`;
   }
 
   /* Hvem skal inn? Lista er alle på turen, med rommet de har i dag
@@ -3350,15 +3867,32 @@ const UI = (() => {
       <button class="btn close" data-close>Avbryt</button>`);
   }
 
+  /* Hotellene turen bor på, slik de står i programmet. Det er de eneste
+     stedene et rom kan høre til — et rom på et museum finnes ikke. */
+  function hotellene() {
+    const ider = Array.from(new Set(S.trip.days.map(d => d.hotel).filter(Boolean)));
+    return ider.map(id => ({ id, navn: (S.trip.places[id] || {}).name || "Hotell" }));
+  }
+
   function sheetRom(id) {
     const r = id && S.rom.rom.find(x => x.id === id);
-    openSheet(`<h3>${r ? "Endre rom" : "Nytt rom"}</h3>
+    const hotell = hotellene();
+    openSheet(`<h3>${r ? "Endre rom" : "Nye rom"}</h3>
+      ${r ? "" : `<p class="lede">Slutter navnet på et tall, teller appen videre:
+        «Rom 201» og fire rom blir 201, 202, 203 og 204.</p>`}
       <form id="romForm">
         <div class="field"><label for="rmNavn">Navn</label>
-          <input id="rmNavn" type="text" maxlength="40" placeholder="Rom 204"
+          <input id="rmNavn" type="text" maxlength="40" placeholder="Rom 201"
             value="${r ? esc(r.navn) : ""}" autocomplete="off"></div>
         <div class="field"><label for="rmAnt">Antall senger</label>
           <input id="rmAnt" type="number" min="1" max="40" inputmode="numeric" value="${r ? r.plasser : 4}"></div>
+        ${r ? "" : `<div class="field"><label for="rmHvorMange">Hvor mange slike rom?</label>
+          <input id="rmHvorMange" type="number" min="1" max="60" inputmode="numeric" value="1"></div>`}
+        ${hotell.length > 1 ? `<div class="field"><label for="rmSted">Hotell</label>
+          <select id="rmSted" class="select">
+            <option value="">Ikke valgt</option>
+            ${hotell.map(h => `<option value="${esc(h.id)}"${r && r.sted === h.id ? " selected" : ""}>${esc(h.navn)}</option>`).join("")}
+          </select></div>` : ""}
         <p class="err" id="rmErr" hidden></p>
         <button class="btn primary big" type="submit" id="rmLagre">Lagre</button>
       </form>
@@ -3371,16 +3905,22 @@ const UI = (() => {
       const err = $("rmErr"), btn = $("rmLagre");
       const navn = $("rmNavn").value.trim();
       const plasser = parseInt($("rmAnt").value, 10);
+      const antall = $("rmHvorMange") ? parseInt($("rmHvorMange").value, 10) : 1;
+      const sted = $("rmSted") ? $("rmSted").value : undefined;
       if (!navn) { err.textContent = "Gi rommet et navn."; err.hidden = false; return; }
       if (!plasser || plasser < 1 || plasser > 40) {
         err.textContent = "Antall senger må være mellom 1 og 40."; err.hidden = false; return;
       }
+      if (!r && (!antall || antall < 1 || antall > 60)) {
+        err.textContent = "Antall rom må være mellom 1 og 60."; err.hidden = false; return;
+      }
       btn.disabled = true; btn.textContent = "Lagrer…";
       try {
-        if (r) await Api.endreRom(r.id, navn, plasser);
-        else await Api.nyttRom(S.trip.id, navn, plasser);
+        if (r) await Api.endreRom(r.id, navn, plasser, sted);
+        else await Api.nyttRom(S.trip.id, navn, plasser, sted, antall);
         closeSheet();
         await aapneRom(true);
+        hentMegTall(true);
       } catch (e2) {
         btn.disabled = false; btn.textContent = "Lagre";
         err.textContent = e2.message; err.hidden = false;
@@ -3392,10 +3932,9 @@ const UI = (() => {
   function sheetSete(kjoretoyId, nr) {
     const k = S.setekart.kjoretoy.find(x => x.id === kjoretoyId);
     if (!k) return;
-    const o = oppsett(k.typ);
-    const plass = setenavn(nr, o.bredde);
+    const plass = plassnavn(k, nr);
     const paa = k.seter.find(s2 => s2.nr === nr);
-    const hvor = new Map(k.seter.map(s2 => [s2.id, setenavn(s2.nr, o.bredde)]));
+    const hvor = new Map(k.seter.map(s2 => [s2.id, plassnavn(k, s2.nr)]));
     openSheet(`<h3>${plass} i ${esc(k.navn)}</h3>
       <p class="lede">${paa ? `${esc(paa.hvem)} sitter her nå.` : "Plassen er ledig."}</p>
       <div class="memberlist">${S.setekart.alle.map(p => `<div class="person">
@@ -3408,6 +3947,107 @@ const UI = (() => {
       ${paa ? `<button class="btn danger" style="width:100%;margin-top:10px"
         data-setevalg="" data-kj="${esc(kjoretoyId)}" data-nr="${nr}">Gjør plassen ledig</button>` : ""}
       <button class="btn close" data-close>Lukk</button>`);
+  }
+
+  /* ───────── ny turkode ─────────
+     Koden er en delt hemmelighet. Kommer den ut til flere enn den
+     skulle, var eneste vei før dette å lage turen på nytt. Den gamle
+     slutter å virke i samme øyeblikk; de som alt er med, merker
+     ingenting. */
+  function sheetByttKode() {
+    openSheet(`<h3>Ny turkode</h3>
+      <p class="lede">Koden er nå <b class="mono">${esc(S.trip.code)}</b>.
+        Lager du en ny, slutter den gamle å virke med en gang.
+        De som alt er med på turen, merker ingenting — men alle som
+        fortsatt skal bli med, må få den nye koden.</p>
+      <p class="err" id="bkErr" hidden></p>
+      <button class="btn primary big" id="bkLag">Lag en ny kode</button>
+      <button class="btn close" data-close>Avbryt</button>`);
+
+    $("bkLag").addEventListener("click", async () => {
+      const btn = $("bkLag"), err = $("bkErr");
+      btn.disabled = true; btn.textContent = "Lager…";
+      try {
+        const ny = await Api.byttTurkode(S.trip.id);
+        await openTrip(S.trip.id);
+        closeSheet();
+        S.tab = "meg"; render();
+        toast("Ny turkode: " + ny);
+      } catch (e) {
+        btn.disabled = false; btn.textContent = "Lag en ny kode";
+        err.textContent = e.message; err.hidden = false;
+      }
+    });
+  }
+
+  /* ───────── slette kontoen ─────────
+     Lå som den fjerde raden i en stabel med faregrep, rett under «Logg
+     ut». Det som ikke kan angres, skal ikke ligge der fingeren er på vei
+     et annet sted. Selve slettingen gjør #slettKontoBtn, som før. */
+  function sheetSlettKonto() {
+    const gjest = Api.erAnonym();
+    openSheet(`<h3>Slette kontoen?</h3>
+      <p class="lede">${gjest
+        ? "Du er gjest, så kontoen finnes bare i denne nettleseren. Alt du har her forsvinner, og du må bruke turkoden på nytt for å komme inn igjen."
+        : "Du mistes fra alle turene dine, og e-posten din kan ikke logge inn igjen. Eier du en tur, må den slettes eller gis bort først."}</p>
+      <p class="muted" style="margin:0 0 16px">Dette kan ikke angres. Vil du bare bort fra
+        denne telefonen, er «Logg ut på denne enheten» det du leter etter.</p>
+      <button class="btn danger big" id="slettKontoBtn">Slett kontoen min</button>
+      <button class="btn close" data-close>Avbryt</button>`);
+  }
+
+  /* ───────── omvisning ─────────
+     En tur settes opp én gang, av en som aldri har gjort det før, og
+     ofte kvelden før avreise. Appen pekte ikke på noe av seg selv: alt
+     sto der, men man måtte finne det.
+
+     Fire kort, ett spørsmål hver, og en knapp som går dit. Reiselederen
+     og deltakeren får ikke de samme — de leter etter ulike ting. Den
+     vises én gang av seg selv, og ligger i Meg etterpå.
+
+     Flagget er lokalt med vilje: den hører til telefonen, ikke til
+     kontoen. Bytter du telefon, er appen ny igjen. */
+  const OMVISNING = {
+    leader: [
+      { h: "Du setter opp turen", t: "Program er dagene og punktene. Du kan lese inn et PDF-hefte, eller legge inn dag for dag. Hvert punkt kan ha et sted, og da får deltakerne veibeskrivelse og værmelding.", knapp: "Åpne Program", tab: "program" },
+      { h: "Appen sier hva som mangler", t: "Står et sted uten adresse, eller en dag uten hotell, dukker det opp under «Må ordnes» i Meg. Er noe ikke nødvendig, krysser du det av, og da er det borte.", knapp: "Åpne Meg", tab: "meg" },
+      { h: "Det praktiske ligger samlet", t: "Pakkeliste, sitteplasser, rom og nødnummer står under Praktisk i Meg. Du bestemmer per kjøretøy og for rommene om deltakerne velger selv eller om du fordeler.", knapp: "Se Praktisk", tab: "meg" },
+      { h: "Turkoden er nøkkelen", t: "Deltakerne blir med ved å skrive navnet sitt og koden. Kommer koden ut til flere enn den skulle, lager du en ny i Meg. Du kan også kreve at du godkjenner hver som blir med.", knapp: "Åpne Deltakere", side: "deltakere" },
+      { h: "Chatten kan være en tavle", t: "En chat er åpen for hele turen, privat for dem du legger til, eller en oppslagstavle der bare reiselederne skriver. Skriver noen «møt på hotellet 18:30», blir det en veibeskrivelse av seg selv.", knapp: "Åpne Chat", tab: "chat" }
+    ],
+    member: [
+      { h: "«I dag» svarer på hva nå", t: "Øverst står det som skjer nå eller er neste, med adressen og en knapp rett til kartet. Venter noe på deg — en plass du ikke har valgt, et bytte noen har spurt om — står det her.", knapp: "Åpne I dag", tab: "idag" },
+      { h: "Program er hele turen", t: "Bla mellom dagene øverst. Hvert punkt med et sted har kart og værmelding, og noen punkter har påmelding.", knapp: "Åpne Program", tab: "program" },
+      { h: "Din plass og ditt rom", t: "Under Praktisk i Meg: pakkelista du krysser av for deg selv, plassen din i bussen eller på toget, rommet ditt, og nummeret du ringer hvis noe skjer.", knapp: "Se Praktisk", tab: "meg" },
+      { h: "Chat og varsler", t: "Hele turen har en chat, og du kan lage egne med dem du vil. Slå på varsler i Meg, ellers er telefonen stille når reiselederen skriver noe viktig.", knapp: "Åpne Chat", tab: "chat" }
+    ]
+  };
+
+  const omvisningNokkel = rolle => "tk.omvisning." + rolle;
+
+  function omvisningSett(rolle) {
+    try { return Boolean(localStorage.getItem(omvisningNokkel(rolle))); }
+    catch { return true; }          // uten lager viser vi den ikke om og om igjen
+  }
+
+  function sheetOmvisning(steg) {
+    const rolle = S.trip.role === "leader" ? "leader" : "member";
+    const kort = OMVISNING[rolle];
+    try { localStorage.setItem(omvisningNokkel(rolle), "1"); } catch { /* uviktig */ }
+
+    const i = Math.max(0, Math.min(steg, kort.length - 1));
+    const k = kort[i];
+    const siste = i === kort.length - 1;
+
+    openSheet(`<p class="eyebrow" style="margin-bottom:6px">Omvisning · ${i + 1} av ${kort.length}</p>
+      <h3>${esc(k.h)}</h3>
+      <p class="lede">${esc(k.t)}</p>
+      <div class="stack">
+        <button class="btn primary big" data-omvisning="${siste ? "ferdig" : i + 1}">${
+          siste ? "Ferdig" : "Neste"}</button>
+        <button class="btn" data-omvisning="gaa:${i}">${esc(k.knapp)}</button>
+      </div>
+      <button class="btn close" data-close>${siste ? "Lukk" : "Hopp over"}</button>`);
   }
 
   function sheetNyttPakk(egen) {
@@ -3441,21 +4081,41 @@ const UI = (() => {
 
   function sheetKjoretoy(id) {
     const k = id && ((S.setekart || {}).kjoretoy || []).find(x => x.id === id);
-    const typ = k ? k.typ : "buss";
+    // En type vi ikke kjenner lenger — fly eller båt fra før de ble tatt
+    // ut — står som «Annet» i velgeren, og blir det hvis man lagrer.
+    const typ = k ? (TYPER[k.typ] ? k.typ : "annet") : "buss";
+    const typer = Object.entries(TYPER);
+    const dager = S.trip.days;
     openSheet(`<h3>${k ? "Endre kjøretøy" : "Nytt kjøretøy"}</h3>
-      <p class="lede">Typen bestemmer hvor bredt kartet står og hvor midtgangen går.</p>
+      <p class="lede">Typen bestemmer hvor bredt kartet står, hvor midtgangen går,
+        og hva en plass heter. Et tog nummererer 41, 42, 43 — en buss 12A, 12B.</p>
       <form id="kjForm">
         <div class="field"><label for="kjNavn">Navn</label>
           <input id="kjNavn" type="text" maxlength="40" placeholder="Buss 1"
             value="${k ? esc(k.navn) : ""}" autocomplete="off"></div>
         <div class="field"><label for="kjTyp">Type</label>
           <select id="kjTyp" class="select">
-            ${Object.entries(TYPER).map(([v, o]) =>
+            ${typer.map(([v, o]) =>
               `<option value="${v}"${v === typ ? " selected" : ""}>${o.navn} — ${o.bredde} i bredden</option>`).join("")}
           </select></div>
         <div class="field"><label for="kjAnt">Antall plasser</label>
           <input id="kjAnt" type="number" min="1" max="400" inputmode="numeric" value="${k ? k.plasser : 56}">
         </div>
+        <div class="field"><label for="kjBak">Ekstra plasser bakerst</label>
+          <select id="kjBak" class="select">
+            ${[0, 1, 2, 3].map(n => `<option value="${n}"${(k ? k.bakerst : 0) === n ? " selected" : ""}>${
+              n === 0 ? "Like mange hele veien" : `${n} mer på bakerste rad`}</option>`).join("")}
+          </select></div>
+        ${dager.length ? `<div class="field"><label for="kjDato">Hvilken dag</label>
+          <select id="kjDato" class="select">
+            <option value="">Hele turen</option>
+            ${dager.map(d => `<option value="${esc(d.date)}"${k && k.dato === d.date ? " selected" : ""}>${esc(cap(d.label))}</option>`).join("")}
+          </select></div>` : ""}
+        ${k ? "" : `<div class="field"><label for="kjHvorMange">Hvor mange like kjøretøy?</label>
+          <input id="kjHvorMange" type="number" min="1" max="60" inputmode="numeric" value="1">
+          </div>
+          <p class="muted" style="margin:-6px 0 14px;font-size:13px">Sju biler: skriv «Bil» og 7.
+            Du får Bil 1 til Bil 7, alle med samme oppsett.</p>`}
         <p class="err" id="kjErr" hidden></p>
         <button class="btn primary big" type="submit" id="kjLagre">Lagre</button>
       </form>
@@ -3468,15 +4128,23 @@ const UI = (() => {
       const err = $("kjErr"), btn = $("kjLagre");
       const navn = $("kjNavn").value.trim();
       const plasser = parseInt($("kjAnt").value, 10);
+      const antall = $("kjHvorMange") ? parseInt($("kjHvorMange").value, 10) : 1;
       if (!navn) { err.textContent = "Gi kjøretøyet et navn."; err.hidden = false; return; }
       if (!plasser || plasser < 1 || plasser > 400) {
         err.textContent = "Antall plasser må være mellom 1 og 400."; err.hidden = false; return;
       }
-      const felter = { navn, typ: $("kjTyp").value, plasser };
+      if (!k && (!antall || antall < 1 || antall > 60)) {
+        err.textContent = "Antall kjøretøy må være mellom 1 og 60."; err.hidden = false; return;
+      }
+      const felter = {
+        navn, typ: $("kjTyp").value, plasser,
+        bakerst: parseInt($("kjBak").value, 10) || 0,
+        dato: $("kjDato") ? ($("kjDato").value || null) : null
+      };
       btn.disabled = true; btn.textContent = "Lagrer…";
       try {
         if (k) await Api.endreKjoretoy(k.id, felter);
-        else await Api.nyttKjoretoy(S.trip.id, felter);
+        else await Api.nyttKjoretoy(S.trip.id, Object.assign({ antall }, felter));
         closeSheet();
         await aapneSeter(true);
         hentMegTall(true);
@@ -4233,7 +4901,7 @@ const UI = (() => {
 
   /* ───────────────── hendelser ───────────────── */
   document.addEventListener("change", async e => {
-    const bryter = e.target.closest("[data-chatskriv],[data-kjfritt],[data-kjgodkjenn]");
+    const bryter = e.target.closest("[data-chatskriv],[data-kjfritt],[data-kjgodkjenn],[data-romfritt],[data-romgodkjenn]");
     if (!bryter) return;
     const paa = bryter.checked;
     try {
@@ -4243,9 +4911,16 @@ const UI = (() => {
       } else if (bryter.dataset.kjfritt) {
         await Api.settKjoretoyvalg(bryter.dataset.kjfritt, { fritt: paa });
         await aapneSeter(true);
-      } else {
+      } else if (bryter.dataset.kjgodkjenn) {
         await Api.settKjoretoyvalg(bryter.dataset.kjgodkjenn, { godkjenn: paa });
         await aapneSeter(true);
+      } else {
+        // Rombryterne ligger på turen, så turen må hentes på nytt — det
+        // er den som bærer verdien videre til resten av skjermene.
+        const felt = bryter.dataset.romfritt ? { fritt: paa } : { godkjenn: paa };
+        await Api.settRomvalg(S.trip.id, felt);
+        await openTrip(S.trip.id);
+        await aapneRom(true);
       }
     } catch {
       bryter.checked = !paa;
@@ -4254,7 +4929,7 @@ const UI = (() => {
   });
 
   document.addEventListener("click", async e => {
-    const t = e.target.closest("[data-tab],[data-side],[data-pakk],[data-slettpakk],[data-sete],[data-setevalg],[data-nykj],[data-endrekj],[data-slettkj],[data-vaerigjen],[data-svarbytte],[data-avgjorbytte],[data-trekkbytte],[data-nyttrom],[data-endrerom],[data-slettrom],[data-fyllrom],[data-settrom],[data-romvalg],[data-utavrom],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-msgmeny],[data-chat],[data-paa],[data-slettchat],[data-bilde],[data-slettbilde],[data-bvlukk],[data-bvmeny],[data-lagrebilde],[data-kopimeld],[data-deltekst],[data-chatside],[data-cmadd],[data-cmdel],[data-cmleave],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn,#skjulInstall,#installKnapp");
+    const t = e.target.closest("[data-tab],[data-side],[data-pakk],[data-slettpakk],[data-sete],[data-setevalg],[data-nykj],[data-endrekj],[data-slettkj],[data-vaerigjen],[data-svarbytte],[data-avgjorbytte],[data-trekkbytte],[data-nyttrom],[data-endrerom],[data-slettrom],[data-fyllrom],[data-fyllalle],[data-settrom],[data-romvalg],[data-utavrom],[data-bytterom],[data-svarrombytte],[data-avgjorrombytte],[data-trekkrombytte],[data-nykontakt],[data-endrekontakt],[data-slettkontakt],[data-nyttopprop],[data-hake],[data-lukkopprop],[data-omvisning],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-msgmeny],[data-chat],[data-paa],[data-slettchat],[data-bilde],[data-slettbilde],[data-bvlukk],[data-bvmeny],[data-lagrebilde],[data-kopimeld],[data-deltekst],[data-chatside],[data-cmadd],[data-cmdel],[data-cmleave],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn,#skjulInstall,#installKnapp");
     if (!t) return;
 
     if (t.id === "joinTilbake") { S.fraStart = false; return visAuth("start"); }
@@ -4337,6 +5012,8 @@ const UI = (() => {
       closeSheet();
       if (t.dataset.side === "pakk") return aapnePakk();
       if (t.dataset.side === "rom") return aapneRom();
+      if (t.dataset.side === "kontakt") return aapneKontakt();
+      if (t.dataset.side === "opprop") return aapneOpprop();
       return aapneSeter();
     }
 
@@ -4368,7 +5045,7 @@ const UI = (() => {
       const leder = S.trip.role === "leader";
       const mitt = k.seter.find(x => x.meg);
       const paa = k.seter.find(x => x.nr === nr);
-      const navn = setenavn(nr, oppsett(k.typ).bredde);
+      const navn = plassOmtale(nr, k);
 
       // Reiselederen fordeler: da er et trykk et valg om hvem, ikke om deg.
       if (leder && !k.fritt) return sheetSete(k.id, nr);
@@ -4376,7 +5053,7 @@ const UI = (() => {
       try {
         if (mitt && mitt.nr === nr) {
           if (!k.fritt) return;                // du satte den ikke selv
-          if (!confirm(`Slippe plassen ${navn} i ${k.navn}?`)) return;
+          if (!confirm(`Slippe ${navn} i ${k.navn}?`)) return;
           await Api.slippSete(k.id);
         } else if (k.fritt && !paa) {
           await Api.taSete(k.id, nr);
@@ -4385,7 +5062,7 @@ const UI = (() => {
           const hvem = paa ? paa.hvem : null;
           if (!confirm(hvem
             ? `Be ${hvem} om å bytte til ${navn} i ${k.navn}?`
-            : `Be om plassen ${navn} i ${k.navn}?`)) return;
+            : `Be om ${navn} i ${k.navn}?`)) return;
           await Api.beOmBytte(k.id, nr);
           toast(hvem ? "Spurt. Du får beskjed når de svarer." : "Spurt. Reiselederen avgjør.");
         }
@@ -4444,7 +5121,112 @@ const UI = (() => {
       return;
     }
     if (t.dataset.utavrom) {
-      try { await Api.settRom(S.trip.id, t.dataset.utavrom, null); await aapneRom(true); }
+      try { await Api.settRom(S.trip.id, t.dataset.utavrom, null); await aapneRom(true); hentMegTall(true); }
+      catch (err) { toast(err.message); }
+      return;
+    }
+
+    if (t.hasAttribute("data-fyllalle")) {
+      const uten = (S.rom.alle || []).filter(p => !p.rom).length;
+      if (!confirm(`Legge de ${uten} uten seng i de ledige sengene? Ingen som alt har rom blir flyttet.`)) return;
+      try {
+        const n = await Api.fyllRom(S.trip.id);
+        await aapneRom(true);
+        hentMegTall(true);
+        toast(n ? `${n} fikk seng.` : "Ingen ledige senger.");
+      } catch (err) { toast(err.message); }
+      return;
+    }
+
+    /* Deltakeren ber om et rom. Står det en seng ledig, er det ingen å
+       spørre, og forespørselen går rett til reiselederen — eller rett
+       gjennom, hvis hen ikke vil se hvert bytte. Er rommet fullt, er det
+       en person man spør: ellers hadde noen blitt stående uten seng. */
+    if (t.dataset.bytterom) {
+      const r = (S.rom.rom || []).find(x => x.id === t.dataset.bytterom);
+      const person = t.dataset.person || null;
+      const hvem = person && r ? (r.folk.find(p => p.id === person) || {}).navn : null;
+      if (!confirm(hvem
+        ? `Be ${hvem} om å bytte rom med deg?`
+        : `Be om en ledig seng på ${r ? r.navn : "rommet"}?`)) return;
+      try {
+        await Api.beOmRombytte(t.dataset.bytterom, person);
+        await aapneRom(true);
+        hentMegTall(true);
+        toast(hvem ? "Spurt. Du får beskjed når de svarer." : "Spurt. Reiselederen avgjør.");
+      } catch (err) { toast(err.message); await aapneRom(true); }
+      return;
+    }
+
+    if (t.dataset.svarrombytte) {
+      try { await Api.svarRombytte(t.dataset.svarrombytte, t.dataset.ja === "1"); await aapneRom(true); hentMegTall(true); }
+      catch (err) { toast(err.message); await aapneRom(true); }
+      return;
+    }
+    if (t.dataset.avgjorrombytte) {
+      try { await Api.avgjorRombytte(t.dataset.avgjorrombytte, t.dataset.ja === "1"); await aapneRom(true); hentMegTall(true); }
+      catch (err) { toast(err.message); await aapneRom(true); }
+      return;
+    }
+    if (t.dataset.trekkrombytte) {
+      try { await Api.trekkRombytte(t.dataset.trekkrombytte); await aapneRom(true); hentMegTall(true); }
+      catch (err) { toast(err.message); await aapneRom(true); }
+      return;
+    }
+
+    // ───── omvisning ─────
+    if (t.dataset.omvisning) {
+      const v = t.dataset.omvisning;
+      if (v === "ferdig") return closeSheet();
+      if (v.startsWith("gaa:")) {
+        const rolle = S.trip.role === "leader" ? "leader" : "member";
+        const k = OMVISNING[rolle][Number(v.slice(4))];
+        closeSheet();
+        if (k && k.side === "deltakere") return aapneDeltakere();
+        if (k && k.tab) return byttFane(k.tab);
+        return;
+      }
+      return sheetOmvisning(Number(v));
+    }
+
+    // ───── nødnummer ─────
+    if (t.hasAttribute("data-nykontakt")) return sheetKontakt(null);
+    if (t.dataset.endrekontakt) return sheetKontakt(t.dataset.endrekontakt);
+
+    if (t.dataset.slettkontakt) {
+      const c = ((S.kontakt || {}).liste || []).find(x => x.id === t.dataset.slettkontakt);
+      if (!confirm(`Slette ${c ? c.navn : "nummeret"}?`)) return;
+      try { await Api.slettKontakt(t.dataset.slettkontakt); await aapneKontakt(true); }
+      catch (err) { toast(err.message); }
+      return;
+    }
+
+    // ───── opprop ─────
+    if (t.hasAttribute("data-nyttopprop")) {
+      try { await Api.nyttOpprop(S.trip.id, ""); await aapneOpprop(true); }
+      catch (err) { toast(err.message); }
+      return;
+    }
+
+    /* Haken settes med en gang på skjermen: et opprop gjøres i farta, og
+       et navn som venter på serveren før det flytter seg, blir haket av
+       to ganger. Går det galt, settes den tilbake. */
+    if (t.dataset.hake) {
+      const runde = (S.opprop || {}).runde;
+      if (!runde) return;
+      const p = (S.opprop.folk || []).find(x => x.id === t.dataset.hake);
+      if (!p) return;
+      const foer = p.her;
+      p.her = !foer; render();
+      try { await Api.settHake(S.trip.id, runde.id, p.id, p.her); }
+      catch (err) { p.her = foer; render(); toast(err.message); }
+      return;
+    }
+
+    if (t.dataset.lukkopprop) {
+      const mangler = (S.opprop.folk || []).filter(p => !p.her).length;
+      if (mangler && !confirm(`${mangler} står fortsatt uten hake. Avslutte oppropet likevel?`)) return;
+      try { await Api.lukkOpprop(t.dataset.lukkopprop); await aapneOpprop(true); }
       catch (err) { toast(err.message); }
       return;
     }
@@ -4673,6 +5455,9 @@ const UI = (() => {
     if (t.dataset.sheet === "deltakere") { closeSheet(); return aapneDeltakere(); }
     if (t.dataset.sheet === "varsler") { closeSheet(); return aapneVarsler(); }
     if (t.dataset.sheet === "varselinfo") return sheetVarselInfo();
+    if (t.dataset.sheet === "byttkode") return sheetByttKode();
+    if (t.dataset.sheet === "omvisning") return sheetOmvisning(0);
+    if (t.dataset.sheet === "slettkonto") return sheetSlettKonto();
     if (t.dataset.sheet === "kartvalg") return sheetKartvalg();
     if (t.dataset.sheet === "endretur") return sheetEndreTur();
     if (t.dataset.sheet === "doppchat") return sheetDoppChat(t.dataset.chat);

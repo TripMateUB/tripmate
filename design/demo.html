@@ -41,6 +41,16 @@
 
   window.CONFIG = { ready: true, supabaseUrl: "", supabaseAnonKey: "", vapidPublicKey: "" };
 
+  /* Omvisningen vises én gang per rolle, og flagget ligger lokalt. I
+     demoen ville den lagt seg over alt man skulle se på, så den kommer
+     bare med ?omvisning=1. */
+  try {
+    for (const rolle of ["leader", "member"]) {
+      if (VALG.has("omvisning")) localStorage.removeItem("tk.omvisning." + rolle);
+      else localStorage.setItem("tk.omvisning." + rolle, "1");
+    }
+  } catch { /* uviktig */ }
+
   await last("../js/templates.js");
   await last("../js/parse.js");
   lagApi();
@@ -82,23 +92,52 @@ const FOLK = [
   { id: "u7", navn: "Ida Strand", leder: false }
 ];
 const kjoretoy = [
-  { id: "k1", navn: "Buss ned", typ: "buss", plasser: 56, sort: 1, fritt: true, godkjenn: true,
+  { id: "k1", navn: "Buss ned", typ: "buss", plasser: 57, sort: 1, fritt: true, godkjenn: true,
+    dato: null, bakerst: 1,
     seter: [{ nr: 14, meg: true, id: "meg", hvem: "Jonas Robstad" },
       { nr: 3, id: "u2", hvem: "Emma Nygård" }, { nr: 4, id: "u3", hvem: "Mathias Lund" },
       { nr: 9, id: "u4", hvem: "Kari Reiseleder" }, { nr: 22, id: "u5", hvem: "Sofie Haugland" },
       { nr: 23, id: "u6", hvem: "Ole Mikkelsen" }],
     bytter: [] },
-  { id: "k2", navn: "Fly ned", typ: "fly", plasser: 30, sort: 2, fritt: true, godkjenn: true,
+  { id: "k2", navn: "Tog hjem — vogn 5", typ: "tog", plasser: 32, sort: 2, fritt: true, godkjenn: true,
+    dato: null, bakerst: 0,
     seter: [{ nr: 1, id: "u2", hvem: "Emma Nygård" }, { nr: 2, id: "u3", hvem: "Mathias Lund" }],
     bytter: [] },
   { id: "k3", navn: "Bil — reiselederne", typ: "bil", plasser: 5, sort: 3, fritt: false, godkjenn: false,
+    dato: null, bakerst: 0,
     seter: [], bytter: [] }
 ];
 const rom = [
-  { id: "r1", navn: "Rom 204", plasser: 4, sort: 1, folk: ["meg", "u3"] },
-  { id: "r2", navn: "Rom 205", plasser: 2, sort: 2, folk: ["u2"] },
-  { id: "r3", navn: "Rom 206", plasser: 3, sort: 3, folk: [] }
+  { id: "r1", navn: "Rom 204", plasser: 4, sort: 1, folk: ["meg", "u3"], sted: null },
+  { id: "r2", navn: "Rom 205", plasser: 2, sort: 2, folk: ["u2"], sted: null },
+  { id: "r3", navn: "Rom 206", plasser: 3, sort: 3, folk: [], sted: null }
 ];
+let rombytter = [];
+const kontakter = [
+  { id: "c1", navn: "Kari Reiseleder", rolle: "Reiseleder", telefon: "+47 900 00 001",
+    notat: "Ring denne først", sort: 10 },
+  { id: "c2", navn: "Tryggheim skular", rolle: "Skolen", telefon: "+47 51 79 95 00",
+    notat: "", sort: 20 }
+];
+let oppropRunde = null;
+let oppropHaker = new Set();
+
+/* Demoen avgjoer et rombytte med en gang: her er det ingen base som
+   holder styr paa to trinn. Flyttingen er den samme som i basen —
+   begge ut av rommene sine foerst, saa inn igjen. */
+function lukkRombytte(id, ja) {
+  const i = rombytter.findIndex(x => x.id === id);
+  if (i < 0) return;
+  const x = rombytter[i];
+  const maal = rom.find(r => r.id === x.rom);
+  if (ja && maal) {
+    const gammelt = rom.find(r => r.folk.includes(x.fraId));
+    for (const r of rom) r.folk = r.folk.filter(p => p !== x.fraId && p !== x.tilId);
+    maal.folk.push(x.fraId);
+    if (x.tilId && gammelt) gammelt.folk.push(x.tilId);
+  }
+  rombytter.splice(i, 1);
+}
 
 /* Demoen avgjoer et bytte med en gang: her er det ingen base som
    holder styr paa to trinn. */
@@ -118,6 +157,20 @@ function lukkBytte(id, ja) {
     k.bytter.splice(i, 1);
     return;
   }
+}
+
+/* Samme navnerekke som api.js: «Rom 201» ×4 blir 201–204, «Bil» ×3
+   blir Bil 1, Bil 2, Bil 3. Ett stykk beholder navnet. */
+function rekke(navn, antall) {
+  const n = Math.max(1, Math.min(60, Number(antall) || 1));
+  if (n === 1) return [navn];
+  const m = String(navn).match(/^(.*?)(\d+)(\D*)$/);
+  if (m) {
+    const start = parseInt(m[2], 10);
+    return Array.from({ length: n }, (_, k) =>
+      m[1] + String(start + k).padStart(m[2].length, "0") + m[3]);
+  }
+  return Array.from({ length: n }, (_, k) => `${navn} ${k + 1}`);
 }
 
 function lagApi() {
@@ -210,6 +263,8 @@ function lagApi() {
     // ?rolle=deltaker og ?tavle=1 lar sjekkene se appen slik en deltaker
     // ser den, uten en ekte base å sette rollen i.
     role: VALG.get("rolle") === "deltaker" ? "member" : "leader", erAdmin: false, erEier: true,
+    // ?romfritt=0 slår av at deltakerne kan flytte seg selv.
+    romFritt: VALG.get("romfritt") !== "0", romGodkjenn: VALG.get("romgodkjenn") !== "0",
     places: stedMap, days,
     channels: tpl.channels.map((c, i) => ({
       id: "kanal" + i, name: c.name, sub: c.sub || null,
@@ -398,8 +453,9 @@ function lagApi() {
     trekkBytte: id => { lukkBytte(id, false); return Promise.resolve(); },
 
     romkart: () => Promise.resolve({
+      bytter: rombytter.map(x => ({ ...x })),
       rom: rom.map(r => ({
-        id: r.id, navn: r.navn, plasser: r.plasser, sort: r.sort,
+        id: r.id, navn: r.navn, plasser: r.plasser, sort: r.sort, sted: r.sted || null,
         folk: r.folk.map(id => {
           const p = FOLK.find(f => f.id === id) || {};
           return { id, navn: p.navn || "Ukjent", meg: id === "meg" };
@@ -410,14 +466,87 @@ function lagApi() {
         rom: (rom.find(r => r.folk.includes(p.id)) || {}).id || null
       }))
     }),
-    nyttRom: (t, navn, plasser) => {
-      rom.push({ id: "r" + (rom.length + 1), navn, plasser, sort: rom.length + 1, folk: [] });
+    /* Samme navnerekke som i api.js: «Rom 201» og fire blir 201–204. */
+    nyttRom: (t, navn, plasser, sted, antall) => {
+      for (const n of rekke(navn, antall)) {
+        rom.push({ id: "r" + (rom.length + 1), navn: n, plasser,
+          sort: rom.length + 1, folk: [], sted: sted || null });
+      }
       return Promise.resolve();
     },
-    endreRom: (id, navn, plasser) => {
-      const r = rom.find(x => x.id === id); if (r) { r.navn = navn; r.plasser = plasser; }
+    endreRom: (id, navn, plasser, sted) => {
+      const r = rom.find(x => x.id === id);
+      if (r) { r.navn = navn; r.plasser = plasser; if (sted !== undefined) r.sted = sted || null; }
       return Promise.resolve();
     },
+    settRomvalg: (t, v) => {
+      if (v.fritt !== undefined) TUR.romFritt = v.fritt;
+      if (v.godkjenn !== undefined) TUR.romGodkjenn = v.godkjenn;
+      return Promise.resolve();
+    },
+    beOmRombytte: (romId, person) => {
+      const r = rom.find(x => x.id === romId);
+      if (!r) return Promise.reject(new Error("Fant ikke rommet."));
+      if (r.folk.includes("meg")) return Promise.reject(new Error("Det er rommet ditt."));
+      if (rombytter.some(x => x.fraMeg)) return Promise.reject(new Error("Du har alt en forespørsel som venter."));
+      const mitt = rom.find(x => x.folk.includes("meg"));
+      if (!person && r.folk.length >= r.plasser) return Promise.reject(new Error("Rommet er fullt."));
+      if (person && !mitt) return Promise.reject(new Error("Du har ikke rom ennå. Spør om en ledig seng i stedet."));
+      const p = FOLK.find(f => f.id === person);
+      rombytter.push({
+        id: "rb" + (rombytter.length + 1), rom: romId,
+        status: person ? "venter_andre" : "venter_leder",
+        fraMeg: true, tilMeg: false, fra: "Jonas Robstad", til: p ? p.navn : null,
+        fraRom: mitt ? mitt.navn : null, fraId: "meg", tilId: person || null
+      });
+      return Promise.resolve();
+    },
+    svarRombytte: (id, ja) => { lukkRombytte(id, ja); return Promise.resolve(); },
+    avgjorRombytte: (id, ja) => { lukkRombytte(id, ja); return Promise.resolve(); },
+    trekkRombytte: id => { lukkRombytte(id, false); return Promise.resolve(); },
+    fyllRom: () => {
+      let n = 0;
+      for (const p of FOLK) {
+        if (rom.some(r => r.folk.includes(p.id))) continue;
+        const ledig = rom.find(r => r.folk.length < r.plasser);
+        if (!ledig) break;
+        ledig.folk.push(p.id); n++;
+      }
+      return Promise.resolve(n);
+    },
+
+    // ── nødnummer ──
+    kontakter: () => Promise.resolve({ liste: kontakter.map(c => ({ ...c })) }),
+    nyKontakt: (t, f) => {
+      kontakter.push({ id: "c" + (kontakter.length + 1), ...f, sort: (kontakter.length + 1) * 10 });
+      return Promise.resolve();
+    },
+    endreKontakt: (id, f) => {
+      const c = kontakter.find(x => x.id === id); if (c) Object.assign(c, f);
+      return Promise.resolve();
+    },
+    slettKontakt: id => {
+      const i = kontakter.findIndex(x => x.id === id); if (i >= 0) kontakter.splice(i, 1);
+      return Promise.resolve();
+    },
+
+    // ── opprop ──
+    opprop: () => Promise.resolve({
+      runde: oppropRunde,
+      folk: FOLK.map(p => ({ id: p.id, navn: p.navn, leder: p.leder, her: oppropHaker.has(p.id) }))
+    }),
+    nyttOpprop: (t, navn) => {
+      oppropRunde = { id: "o1", navn: navn || "", lukket: false, created_at: new Date().toISOString() };
+      oppropHaker = new Set();
+      return Promise.resolve("o1");
+    },
+    settHake: (t, runde, person, her) => {
+      if (her) oppropHaker.add(person); else oppropHaker.delete(person);
+      return Promise.resolve();
+    },
+    lukkOpprop: () => { oppropRunde = null; oppropHaker = new Set(); return Promise.resolve(); },
+
+    byttTurkode: () => { TUR.code = "NYKODE".slice(0, 6); return Promise.resolve(TUR.code); },
     slettRom: id => {
       const i = rom.findIndex(x => x.id === id); if (i >= 0) rom.splice(i, 1);
       return Promise.resolve();
@@ -446,8 +575,11 @@ function lagApi() {
       return Promise.resolve();
     },
     nyttKjoretoy: (t, f) => {
-      kjoretoy.push({ id: "k" + (kjoretoy.length + 1), ...f, sort: kjoretoy.length + 1,
-        fritt: true, godkjenn: true, seter: [], bytter: [] });
+      for (const navn of rekke(f.navn, f.antall)) {
+        kjoretoy.push({ id: "k" + (kjoretoy.length + 1), ...f, navn, sort: kjoretoy.length + 1,
+          dato: f.dato || null, bakerst: f.bakerst || 0,
+          fritt: true, godkjenn: true, seter: [], bytter: [] });
+      }
       return Promise.resolve();
     },
     endreKjoretoy: (id, f) => {
@@ -466,7 +598,14 @@ function lagApi() {
       pakkTotalt: pakk.length + pakkEgen.length,
       pakkKrysset: pakk.concat(pakkEgen).filter(p => p.kryss).length,
       kjoretoy: kjoretoy.length,
-      mineSeter: kjoretoy.filter(k => k.seter.some(s2 => s2.meg)).length
+      mineSeter: kjoretoy.filter(k => k.seter.some(s2 => s2.meg)).length,
+      rom: rom.length,
+      harRom: rom.some(r => r.folk.includes("meg")),
+      byttSeter: kjoretoy.reduce((n, k) => n + k.bytter.filter(x =>
+        (x.status === "venter_andre" && x.tilMeg) || x.status === "venter_leder").length, 0),
+      byttRom: rombytter.filter(x =>
+        (x.status === "venter_andre" && x.tilMeg) || x.status === "venter_leder").length,
+      utenRom: FOLK.filter(p => !rom.some(r => r.folk.includes(p.id))).length
     }),
     lastVarselvalg: lover(undefined), varselvalg: () => ({ tur: "viktig", chat: {} }), varselNiva: () => "alt",
     settVarselNiva: lover(undefined),

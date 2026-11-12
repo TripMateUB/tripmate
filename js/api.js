@@ -30,6 +30,7 @@ const Api = (() => {
     snapshot: id => `tk.snapshot.${id}`,
     vaer: id => `tk.vaer.${id}`,
     lest: id => `tk.lest.${id}`,
+    praktisk: id => `tk.praktisk.${id}`,
     kart: "tk.kart"
   };
 
@@ -182,6 +183,10 @@ const Api = (() => {
     if (m.includes("ukjent_bytte")) return k("Fant ikke forespørselen.");
     if (m.includes("rom_fullt")) return k("Rommet er fullt.");
     if (m.includes("ukjent_rom")) return k("Fant ikke rommet.");
+    if (m.includes("alt_ditt_rom")) return k("Det er rommet ditt.");
+    if (m.includes("du_har_ikke_rom")) return k("Du har ikke rom ennå. Spør om en ledig seng i stedet.");
+    if (m.includes("ikke_i_rommet")) return k("Den personen bor ikke der lenger.");
+    if (m.includes("kodegenerering_feilet")) return k("Klarte ikke lage en ny kode. Prøv igjen.");
     if (m.includes("sete_tatt")) return k("Den plassen ble tatt av noen andre.");
     if (m.includes("ugyldig_sete")) return k("Det setet finnes ikke.");
     if (m.includes("ikke_paamelding")) return k("Dette punktet har ikke påmelding.");
@@ -238,6 +243,7 @@ const Api = (() => {
       localStorage.removeItem(LS.lastChannel(tripId));
       localStorage.removeItem(LS.vaer(tripId));
       localStorage.removeItem(LS.lest(tripId));
+      localStorage.removeItem(LS.praktisk(tripId));
       if (lsGet(LS.lastTrip, null) === tripId) localStorage.removeItem(LS.lastTrip);
     } catch { /* uviktig */ }
     if (cache.trip && cache.trip.id === tripId) cache.trip = null;
@@ -276,6 +282,12 @@ const Api = (() => {
       id: trip.id, code: trip.code, name: trip.name, org: trip.org,
       krevGodkjenning: trip.require_approval === true,
       bilder: trip.bilder !== false,
+      // Rommene har de samme to bryterne setene har, men på turen: et
+      // bytte går mellom to rom, og én bryter per rom ville gitt to svar
+      // på samme spørsmål. Begge leses med fallback, så appen virker mot
+      // en base der Utvidelse 27 ikke er kjørt ennå.
+      romFritt: trip.rom_fritt === true,
+      romGodkjenn: trip.rom_godkjenn !== false,
       venter: member ? member.status === "pending" : false,
       dates: days.length ? datoSpenn(days[0].date, days[days.length - 1].date) : "",
       // "admin" er skjult: den gir samme rettigheter som reiseleder, men
@@ -1235,7 +1247,46 @@ const Api = (() => {
      punktene, og krysser av for seg selv. Din egen del er din alene, og
      ligger i en annen tabell fordi den ikke skal kunne leses av andre
      i det hele tatt, ikke engang ved et uhell. */
-  async function pakkeliste(tripId) {
+  /* ───────── de praktiske listene uten nett ─────────
+     Pakkelista, setekartet, rommene og nummerene trengs nettopp der
+     nettet mangler: på bussen, i fjellet, på et hotell i utlandet. De
+     hentes som før, men siste svar blir liggende, og kommer appen ingen
+     vei, viser den kopien i stedet for «Klarte ikke hente».
+
+     Kopien er din: «meg»-merkene i den gjelder denne enhetens bruker.
+     Logger noen andre seg på her, hentes alt på nytt — men da er det
+     også et nytt localStorage, for innlogging tømmer tk.-nøklene. */
+  function praktiskLagre(tripId, del, verdi) {
+    const alt = lsGet(LS.praktisk(tripId), {}) || {};
+    alt[del] = verdi;
+    lsSet(LS.praktisk(tripId), alt);
+    return verdi;
+  }
+
+  async function offlineTaalt(tripId, del, hent) {
+    const lagret = () => {
+      const l = (lsGet(LS.praktisk(tripId), {}) || {})[del];
+      // «lagret» er beskjeden til skjermen: dette er sist svar, ikke nå.
+      return l ? Object.assign({ lagret: true }, l) : null;
+    };
+    if (!online()) {
+      const l = lagret();
+      if (l) return l;
+    }
+    try {
+      return praktiskLagre(tripId, del, await hent());
+    } catch (e) {
+      const l = lagret();
+      if (l) return l;
+      throw e;
+    }
+  }
+
+  function pakkeliste(tripId) {
+    return offlineTaalt(tripId, "pakk", () => hentPakkeliste(tripId));
+  }
+
+  async function hentPakkeliste(tripId) {
     const [punkter, kryss, egne] = await Promise.all([
       sb.from("pakk").select("id, txt, sort").eq("trip_id", tripId).order("sort"),
       sb.from("pakk_kryss").select("pakk_id"),
@@ -1289,10 +1340,26 @@ const Api = (() => {
      tilbake. Hvert av dem har sitt eget kart, og du har én plass i
      hvert. Derfor hentes kjøretøyene og setene sammen — kartet er
      ingenting uten oppsettet, og oppsettet er tomt uten setene. */
-  async function setekart(tripId) {
+  function setekart(tripId) {
+    return offlineTaalt(tripId, "seter", () => hentSetekart(tripId));
+  }
+
+  /* Kolonnelista nevner dato og bakerst ved navn. Mangler de — basen er
+     ikke oppdatert ennå — svarer PostgREST med feil på hele spørringen,
+     og da hentes kjøretøyene om igjen uten dem. Ett ekstra kall den ene
+     gangen det gjelder, i stedet for «select *» som også ville dratt med
+     seg hver kolonne noen legger til senere. */
+  async function hentKjoretoy(tripId) {
+    const felter = "id, navn, typ, plasser, sort, fritt, godkjenn, dato, bakerst";
+    const forsok = await sb.from("kjoretoy").select(felter).eq("trip_id", tripId).order("sort");
+    if (!forsok.error) return forsok;
+    return sb.from("kjoretoy").select("id, navn, typ, plasser, sort, fritt, godkjenn")
+      .eq("trip_id", tripId).order("sort");
+  }
+
+  async function hentSetekart(tripId) {
     const [kj, st, folk, byt] = await Promise.all([
-      sb.from("kjoretoy").select("id, navn, typ, plasser, sort, fritt, godkjenn")
-        .eq("trip_id", tripId).order("sort"),
+      hentKjoretoy(tripId),
       sb.from("seter").select("kjoretoy_id, nr, user_id").eq("trip_id", tripId),
       sb.from("members").select("user_id, name").eq("trip_id", tripId),
       sb.from("setebytte").select("id, kjoretoy_id, fra_user, til_user, nr, status")
@@ -1316,6 +1383,9 @@ const Api = (() => {
     const kjoretoy = (kj.data || []).map(k => ({
       id: k.id, navn: k.navn, typ: k.typ, plasser: k.plasser, sort: k.sort,
       fritt: k.fritt !== false, godkjenn: k.godkjenn !== false,
+      // Tom dato er et gyldig svar: «bussen vi bruker hele turen».
+      dato: k.dato || null,
+      bakerst: k.bakerst == null ? 0 : k.bakerst,
       seter: tatt.filter(s => s.kjoretoy_id === k.id).map(s => ({
         nr: s.nr, meg: s.user_id === userId, id: s.user_id,
         hvem: navn.get(s.user_id) || "Ukjent"
@@ -1365,19 +1435,50 @@ const Api = (() => {
   /* ───────── rom ─────────
      Et rom er et navn, et antall senger og en liste med folk. Ingen
      nummerering å sikte på, så ingen grunn til et kart. */
-  async function romkart(tripId) {
-    const [rom, plass, folk] = await Promise.all([
-      sb.from("rom").select("id, navn, plasser, sort").eq("trip_id", tripId).order("sort"),
+  function romkart(tripId) {
+    return offlineTaalt(tripId, "rom", () => hentRomkart(tripId));
+  }
+
+  /* Som for kjøretøyene: sted_id er ny, og mangler den, hentes rommene
+     om igjen uten den i stedet for at hele siden feiler. */
+  async function hentRom(tripId) {
+    const forsok = await sb.from("rom").select("id, navn, plasser, sort, sted_id")
+      .eq("trip_id", tripId).order("sort");
+    if (!forsok.error) return forsok;
+    return sb.from("rom").select("id, navn, plasser, sort").eq("trip_id", tripId).order("sort");
+  }
+
+  async function hentRomkart(tripId) {
+    const [rom, plass, folk, byt] = await Promise.all([
+      hentRom(tripId),
       sb.from("rom_plass").select("rom_id, user_id").eq("trip_id", tripId),
-      sb.from("members").select("user_id, name, role").eq("trip_id", tripId).order("name")
+      sb.from("members").select("user_id, name, role").eq("trip_id", tripId).order("name"),
+      // Rombytte er nytt i Utvidelse 27. Finnes ikke tabellen, er det
+      // ingen bytter å vise — ikke en feil som skal stoppe siden.
+      sb.from("rombytte").select("id, rom_id, fra_user, til_user, status")
+        .eq("trip_id", tripId).in("status", ["venter_andre", "venter_leder"])
+        .then(r => r, () => ({ data: [] }))
     ]);
     if (rom.error) throw friendly(rom.error);
     if (plass.error) throw friendly(plass.error);
     const navn = new Map((folk.data || []).map(m => [m.user_id, m.name]));
     const i = (plass.data || []);
+    const romnavn = new Map((rom.data || []).map(r => [r.id, r.navn]));
+    const hvor = new Map(i.map(x => [x.user_id, x.rom_id]));
+    const bytter = ((byt.error ? [] : byt.data) || []).map(x => ({
+      id: x.id, rom: x.rom_id, status: x.status,
+      fraMeg: x.fra_user === userId, tilMeg: x.til_user === userId,
+      fra: navn.get(x.fra_user) || "Ukjent",
+      til: x.til_user ? (navn.get(x.til_user) || "Ukjent") : null,
+      // Rommet den som spør bor i nå. Står det tomt, ber hen om en ledig
+      // seng og har ingenting å bytte bort.
+      fraRom: romnavn.get(hvor.get(x.fra_user)) || null
+    }));
     return {
+      bytter,
       rom: (rom.data || []).map(r => ({
         id: r.id, navn: r.navn, plasser: r.plasser, sort: r.sort,
+        sted: r.sted_id || null,
         folk: i.filter(x => x.rom_id === r.id).map(x => ({
           id: x.user_id, navn: navn.get(x.user_id) || "Ukjent", meg: x.user_id === userId
         }))
@@ -1391,14 +1492,47 @@ const Api = (() => {
     };
   }
 
-  async function nyttRom(tripId, navn, plasser) {
-    const { error } = await sb.from("rom")
-      .insert({ trip_id: tripId, navn, plasser, sort: Date.now() % 2147483647 });
+  /* Ett rom, eller flere like på rad. «Rom 201» og antall 4 blir
+     «Rom 201», «Rom 202», «Rom 203», «Rom 204» — slutter navnet på et
+     tall, teller vi videre fra det. Reiselederen la inn førti senger ett
+     skjema av gangen før dette. */
+  async function nyttRom(tripId, navn, plasser, sted, antall) {
+    const rader = navnerekke(navn, antall).map((n, k) => ({
+      trip_id: tripId, navn: n, plasser,
+      sted_id: sted || null,
+      sort: (Date.now() % 2147483647) + k
+    }));
+    let { error } = await sb.from("rom").insert(rader);
+    // Mangler sted_id i basen, legges rommene inn uten hotell.
+    if (error && /sted_id/.test(error.message || "")) {
+      ({ error } = await sb.from("rom")
+        .insert(rader.map(r => ({ trip_id: r.trip_id, navn: r.navn, plasser: r.plasser, sort: r.sort }))));
+    }
     if (error) throw friendly(error);
   }
 
-  async function endreRom(id, navn, plasser) {
-    const { error } = await sb.from("rom").update({ navn, plasser }).eq("id", id);
+  /* «Rom 201» ×4 → 201, 202, 203, 204. «Buss» ×3 → «Buss 1», «Buss 2»,
+     «Buss 3». Ett stykk beholder navnet slik det ble skrevet. */
+  function navnerekke(navn, antall) {
+    const n = Math.max(1, Math.min(60, Number(antall) || 1));
+    if (n === 1) return [navn];
+    const m = String(navn).match(/^(.*?)(\d+)(\D*)$/);
+    if (m) {
+      const bredde = m[2].length;
+      const start = parseInt(m[2], 10);
+      return Array.from({ length: n }, (_, k) =>
+        m[1] + String(start + k).padStart(bredde, "0") + m[3]);
+    }
+    return Array.from({ length: n }, (_, k) => `${navn} ${k + 1}`);
+  }
+
+  async function endreRom(id, navn, plasser, sted) {
+    const rad = { navn, plasser };
+    if (sted !== undefined) rad.sted_id = sted || null;
+    let { error } = await sb.from("rom").update(rad).eq("id", id);
+    if (error && /sted_id/.test(error.message || "")) {
+      ({ error } = await sb.from("rom").update({ navn, plasser }).eq("id", id));
+    }
     if (error) throw friendly(error);
   }
 
@@ -1411,6 +1545,143 @@ const Api = (() => {
     const { error } = await sb.rpc("sett_rom",
       { p_trip: tripId, p_user: brukerId, p_rom: romId || null });
     if (error) throw friendly(error);
+  }
+
+  /* Rommene har de samme to bryterne som kjøretøyene, men på turen:
+     et bytte går mellom to rom. */
+  async function settRomvalg(tripId, { fritt, godkjenn }) {
+    const { error } = await sb.rpc("sett_romvalg", {
+      p_trip: tripId,
+      p_fritt: fritt === undefined ? null : fritt,
+      p_godkjenn: godkjenn === undefined ? null : godkjenn
+    });
+    if (error) throw friendly(error);
+  }
+
+  /* Tom person betyr «den ledige sengen». Er rommet fullt, må man spørre
+     en bestemt — ellers er det ikke et bytte. */
+  async function beOmRombytte(romId, personId) {
+    const { error } = await sb.rpc("be_om_rombytte",
+      { p_rom: romId, p_til: personId || null });
+    if (error) throw friendly(error);
+  }
+
+  async function svarRombytte(id, ja) {
+    const { error } = await sb.rpc("svar_rombytte", { p_id: id, p_ja: ja });
+    if (error) throw friendly(error);
+  }
+
+  async function avgjorRombytte(id, ja) {
+    const { error } = await sb.rpc("avgjor_rombytte", { p_id: id, p_ja: ja });
+    if (error) throw friendly(error);
+  }
+
+  async function trekkRombytte(id) {
+    const { error } = await sb.rpc("trekk_rombytte", { p_id: id });
+    if (error) throw friendly(error);
+  }
+
+  /* Legger dem uten seng i de ledige sengene. Ingen som alt har rom blir
+     flyttet. Svarer med hvor mange som fikk plass. */
+  async function fyllRom(tripId, sted) {
+    const { data, error } = await sb.rpc("fyll_rom", { p_trip: tripId, p_sted: sted || null });
+    if (error) throw friendly(error);
+    return Number(data) || 0;
+  }
+
+  /* ───────── nødnummer ─────────
+     Alle leser, bare reiseledere skriver. Det eneste i appen noen leter
+     etter når det haster, så det ligger offline sammen med de andre
+     praktiske listene. */
+  function kontakter(tripId) {
+    return offlineTaalt(tripId, "kontakt", () => hentKontakter(tripId));
+  }
+
+  async function hentKontakter(tripId) {
+    const { data, error } = await sb.from("kontakt")
+      .select("id, navn, rolle, telefon, notat, sort").eq("trip_id", tripId).order("sort");
+    if (error) throw friendly(error);
+    return { liste: data || [] };
+  }
+
+  async function nyKontakt(tripId, { navn, rolle, telefon, notat }) {
+    const { error } = await sb.from("kontakt").insert({
+      trip_id: tripId, navn, rolle: rolle || "", telefon, notat: notat || "",
+      sort: Date.now() % 2147483647
+    });
+    if (error) throw friendly(error);
+  }
+
+  async function endreKontakt(id, { navn, rolle, telefon, notat }) {
+    const { error } = await sb.from("kontakt")
+      .update({ navn, rolle: rolle || "", telefon, notat: notat || "" }).eq("id", id);
+    if (error) throw friendly(error);
+  }
+
+  async function slettKontakt(id) {
+    const { error } = await sb.from("kontakt").delete().eq("id", id);
+    if (error) throw friendly(error);
+  }
+
+  /* ───────── opprop ─────────
+     En runde: den åpnes, navnene hakes av, den lukkes. Bare reiseledere
+     ser den — hvem som mangler er ikke noe hele bussen skal lese.
+     Reglene i basen sier det samme; dette er bare veien dit. */
+  async function opprop(tripId) {
+    const [runde, folk] = await Promise.all([
+      sb.from("opprop").select("id, navn, lukket, created_at")
+        .eq("trip_id", tripId).eq("lukket", false)
+        .order("created_at", { ascending: false }).limit(1),
+      sb.from("members").select("user_id, name, role")
+        .eq("trip_id", tripId).eq("status", "approved").order("name")
+        .then(r => r, () => ({ data: [] }))
+    ]);
+    if (runde.error) throw friendly(runde.error);
+    const aapen = (runde.data || [])[0] || null;
+    const haker = aapen
+      ? await sb.from("opprop_hake").select("user_id").eq("opprop_id", aapen.id)
+      : { data: [] };
+    const hake = new Set(((haker.data) || []).map(r => r.user_id));
+    return {
+      runde: aapen,
+      folk: (folk.data || []).map(m => ({
+        id: m.user_id, navn: m.name, leder: m.role !== "member", her: hake.has(m.user_id)
+      }))
+    };
+  }
+
+  async function nyttOpprop(tripId, navn) {
+    const { data, error } = await sb.from("opprop")
+      .insert({ trip_id: tripId, navn: navn || "" }).select("id").single();
+    if (error) throw friendly(error);
+    return data.id;
+  }
+
+  async function settHake(tripId, oppropId, personId, her) {
+    const { error } = her
+      ? await sb.from("opprop_hake")
+          .upsert({ trip_id: tripId, opprop_id: oppropId, user_id: personId },
+                  { onConflict: "opprop_id,user_id" })
+      : await sb.from("opprop_hake").delete()
+          .eq("opprop_id", oppropId).eq("user_id", personId);
+    if (error) throw friendly(error);
+  }
+
+  async function lukkOpprop(id) {
+    const { error } = await sb.from("opprop").update({ lukket: true }).eq("id", id);
+    if (error) throw friendly(error);
+  }
+
+  /* Ny turkode. Den gamle slutter å virke i samme øyeblikk — de som alt
+     er med, merker ingenting. */
+  async function byttTurkode(tripId) {
+    const { data, error } = await sb.rpc("bytt_turkode", { p_trip: tripId });
+    if (error) throw friendly(error);
+    if (cache.trip && cache.trip.id === tripId && data) {
+      cache.trip.code = data;
+      lsSet(LS.snapshot(tripId), cache.trip);
+    }
+    return data;
   }
 
   /* Gjennom basen, ikke gjennom appen: to som trykker på samme sete
@@ -1426,16 +1697,32 @@ const Api = (() => {
     if (error) throw friendly(error);
   }
 
-  async function nyttKjoretoy(tripId, { navn, typ, plasser }) {
-    const { data, error } = await sb.from("kjoretoy")
-      .insert({ trip_id: tripId, navn, typ, plasser, sort: Date.now() % 2147483647 })
-      .select("id").single();
+  /* Sju biler var sju skjemaer. «Bil» og antall 7 blir Bil 1 … Bil 7 i
+     én omgang, med samme type, samme antall plasser og samme dato. */
+  async function nyttKjoretoy(tripId, { navn, typ, plasser, dato, bakerst, antall }) {
+    const rader = navnerekke(navn, antall).map((n, k) => ({
+      trip_id: tripId, navn: n, typ, plasser,
+      dato: dato || null, bakerst: bakerst || 0,
+      sort: (Date.now() % 2147483647) + k
+    }));
+    let { data, error } = await sb.from("kjoretoy").insert(rader).select("id");
+    if (error && /dato|bakerst/.test(error.message || "")) {
+      ({ data, error } = await sb.from("kjoretoy").insert(rader.map(r => ({
+        trip_id: r.trip_id, navn: r.navn, typ: r.typ, plasser: r.plasser, sort: r.sort
+      }))).select("id"));
+    }
     if (error) throw friendly(error);
-    return data.id;
+    return (data && data[0] && data[0].id) || null;
   }
 
-  async function endreKjoretoy(id, { navn, typ, plasser }) {
-    const { error } = await sb.from("kjoretoy").update({ navn, typ, plasser }).eq("id", id);
+  async function endreKjoretoy(id, { navn, typ, plasser, dato, bakerst }) {
+    const rad = { navn, typ, plasser };
+    if (dato !== undefined) rad.dato = dato || null;
+    if (bakerst !== undefined) rad.bakerst = bakerst || 0;
+    let { error } = await sb.from("kjoretoy").update(rad).eq("id", id);
+    if (error && /dato|bakerst/.test(error.message || "")) {
+      ({ error } = await sb.from("kjoretoy").update({ navn, typ, plasser }).eq("id", id));
+    }
     if (error) throw friendly(error);
   }
 
@@ -1449,22 +1736,50 @@ const Api = (() => {
      finnes ennå — skal fana vise seg likevel, bare uten tall. */
   async function megTall(tripId) {
     if (!online()) return null;
-    const [p, k, e, s2] = await Promise.all([
+    const leder = isLeader();
+    const [p, k, e, s2, rom, mittRom, byt, rbyt, folk, senger] = await Promise.all([
       sb.from("pakk").select("id", { count: "exact", head: true }).eq("trip_id", tripId),
       sb.from("pakk_kryss").select("pakk_id, pakk!inner(trip_id)", { count: "exact", head: true })
         .eq("pakk.trip_id", tripId),
       sb.from("pakk_egen").select("kryss").eq("trip_id", tripId),
-      sb.from("kjoretoy").select("id").eq("trip_id", tripId)
+      sb.from("kjoretoy").select("id").eq("trip_id", tripId),
+      sb.from("rom").select("id", { count: "exact", head: true }).eq("trip_id", tripId),
+      sb.from("rom_plass").select("rom_id").eq("trip_id", tripId).eq("user_id", userId),
+      // Det som venter på et svar fra deg. Reiselederen får i tillegg de
+      // som venter på en godkjenning.
+      sb.from("setebytte").select("id, til_user, status").eq("trip_id", tripId)
+        .in("status", ["venter_andre", "venter_leder"]),
+      sb.from("rombytte").select("id, til_user, status").eq("trip_id", tripId)
+        .in("status", ["venter_andre", "venter_leder"]),
+      // Bare reiselederen trenger disse to: hvor mange står uten seng og
+      // uten plass. For en deltaker er det ikke hens oppgave, og da er
+      // det ikke verdt to spørringer.
+      leder ? sb.from("members").select("user_id", { count: "exact", head: true })
+                .eq("trip_id", tripId).eq("status", "approved")
+            : Promise.resolve({ count: 0 }),
+      leder ? sb.from("rom_plass").select("user_id", { count: "exact", head: true })
+                .eq("trip_id", tripId)
+            : Promise.resolve({ count: 0 })
     ].map(q => q.then(r => r, () => ({ data: [], count: 0 }))));
     const mine = s2.data && s2.data.length
       ? await sb.from("seter").select("kjoretoy_id").eq("trip_id", tripId).eq("user_id", userId)
+          .then(r => r, () => ({ data: [] }))
       : { data: [] };
     const egne = e.data || [];
+    const paaMeg = rader => (rader || []).filter(x =>
+      (x.status === "venter_andre" && x.til_user === userId) ||
+      (x.status === "venter_leder" && leder)).length;
     return {
       pakkTotalt: (p.count || 0) + egne.length,
       pakkKrysset: (k.count || 0) + egne.filter(x => x.kryss).length,
       kjoretoy: (s2.data || []).length,
-      mineSeter: (mine.data || []).length
+      mineSeter: (mine.data || []).length,
+      rom: rom.count || 0,
+      harRom: Boolean(mittRom.data && mittRom.data.length),
+      byttSeter: paaMeg(byt.data),
+      byttRom: paaMeg(rbyt.data),
+      // Bare satt for reiseledere, og bare meningsfull når turen har rom.
+      utenRom: Math.max(0, (folk.count || 0) - (senger.count || 0))
     };
   }
 
@@ -1892,6 +2207,9 @@ const Api = (() => {
     setekart, taSete, slippSete, nyttKjoretoy, endreKjoretoy, slettKjoretoy, megTall,
     settSete, settKjoretoyvalg, beOmBytte, svarBytte, avgjorBytte, trekkBytte,
     romkart, nyttRom, endreRom, slettRom, settRom,
+    settRomvalg, beOmRombytte, svarRombytte, avgjorRombytte, trekkRombytte, fyllRom,
+    kontakter, nyKontakt, endreKontakt, slettKontakt,
+    opprop, nyttOpprop, settHake, lukkOpprop, byttTurkode,
     applyTemplate, lesProgramFraPdf, signOutLocal,
     varselStatus, slaaPaaVarsler, slaaAvVarsler, varselEnheter, testVarsel, varmVarsler,
     erHer, ikkeHer,
