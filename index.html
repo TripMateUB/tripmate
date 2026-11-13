@@ -19,7 +19,7 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap">
 <noscript><link rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap"></noscript>
-<link rel="stylesheet" href="styles.css?v=106">
+<link rel="stylesheet" href="styles.css?v=107">
 </head>
 <body>
 
@@ -151,6 +151,15 @@
   <div id="composerSlot"></div>
 
   <nav class="tabbar" id="tabbar" role="tablist" aria-label="Hovedmeny"></nav>
+
+  <!-- Omvisningen. Den ligger over appen og peker på det den snakker
+       om, i stedet for å beskrive hvor det er. Markeringen og kortet
+       plasseres av ui.js etter hver tegning, fordi de måler den ekte
+       knappen — den flytter seg når innholdet gjør det. -->
+  <div class="omvis" id="omvis" hidden>
+    <div class="omvis-ring" id="omvisRing" aria-hidden="true"></div>
+    <div class="omvis-kort" id="omvisKort" role="dialog" aria-modal="true" aria-live="polite"></div>
+  </div>
 </section>
 
 <!-- ============ ARK ============ -->
@@ -160,12 +169,12 @@
 
 <div class="toast" id="toast" hidden></div>
 
-<script src="js/config.js?v=106"></script>
-<script src="vendor/supabase.js?v=106"></script>
-<script src="js/templates.js?v=106"></script>
-<script src="js/api.js?v=106"></script>
-<script src="js/parse.js?v=106"></script>
-<script src="js/ui.js?v=106"></script>
+<script src="js/config.js?v=107"></script>
+<script src="vendor/supabase.js?v=107"></script>
+<script src="js/templates.js?v=107"></script>
+<script src="js/api.js?v=107"></script>
+<script src="js/parse.js?v=107"></script>
+<script src="js/ui.js?v=107"></script>
 <script>
 
 // Safari regner 100dvh litt feil, og da blir appen kortere enn skjermen —

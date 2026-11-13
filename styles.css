@@ -143,6 +143,17 @@ button,input,select,textarea{font:inherit;color:inherit}
   opacity:var(--oy-slor, 0);
   transition:opacity var(--t-liten) linear;
 }
+/* Men der glasset finnes, er mykneren i veien for det. Den malte hvitt
+   over hele feltet bak baren, så det som gled under, var borte før det
+   kom dit — og en frostet rute med ingenting bak seg er bare en lys
+   flate. Nå slutter sløret rett over baren, og programmet man blar
+   forbi synes gjennom den. */
+@supports ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))) {
+  .app::after{
+    height:calc(var(--oy-plass, 0px) - 18px);
+    background:linear-gradient(to bottom, #FFFFFF00 0%, #FFFFFF00 55%, #FFFFFFAA 100%);
+  }
+}
 
 /* ---------- øya ----------
    Apple, om iOS 26: fanelinja flyter over innholdet. Den er en kapsel
@@ -1229,3 +1240,40 @@ a.listrow:active{transform:none}
    linjer og mindre skrift enn «12C». */
 .setet.ord{max-width:84px}
 .setet.ord b{font-size:10.5px;line-height:1.15;white-space:normal;text-align:center}
+
+/* ---------- omvisningen ----------
+   Den forteller ikke hvor ting ligger, den peker på dem. Ringen sitter
+   rundt den ekte knappen, og alt annet dimmes ned av den samme ringen:
+   en skygge med uendelig spredning fyller resten av skjermen. Da er det
+   ett hull i mørket, og det er der du skal se.
+
+   Laget ligger inne i .app, ikke over hele vinduet, så omvisningen
+   holder seg innenfor telefonen også på en bred skjerm. */
+.omvis{position:absolute;inset:0;z-index:40;overflow:hidden}
+.omvis-ring{
+  position:absolute;border-radius:14px;
+  /* Mørket og ringen i samme skygge: da kan de aldri komme i utakt. */
+  box-shadow:0 0 0 2px var(--merke), 0 0 0 4000px rgba(16,53,65,.58);
+  transition:top var(--t-meny) var(--ease-skuff), left var(--t-meny) var(--ease-skuff),
+             width var(--t-meny) var(--ease-skuff), height var(--t-meny) var(--ease-skuff);
+  pointer-events:none;
+}
+/* Finner steget ingenting å peke på, dimmes skjermen likevel — ellers
+   ville kortet stått uten bakgrunn og sett ut som en feil. Ringen
+   legger seg da over hele flaten, uten kant. */
+.omvis-ring.tom{inset:0;width:auto;height:auto;border-radius:0;
+  box-shadow:inset 0 0 0 4000px rgba(16,53,65,.58);transition:none}
+.omvis-kort{
+  position:absolute;left:14px;right:14px;
+  background:var(--surface);border-radius:18px;padding:16px 16px 14px;
+  box-shadow:0 10px 40px -12px rgba(16,53,65,.55);
+}
+.omvis-kort.midt{top:50%;bottom:auto;transform:translateY(-50%)}
+.omvis-teller{font-family:"DM Sans",sans-serif;font-size:11px;font-weight:600;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);margin:0 0 6px}
+.omvis-kort h3{font-size:19px;letter-spacing:-.015em}
+.omvis-kort p{font-size:14.5px;color:var(--ink-2);margin:7px 0 0;line-height:1.45}
+.omvis-knapper{display:flex;gap:8px;margin-top:14px}
+.omvis-knapper .btn{flex:1}
+/* «Hopp over resten» skal kunne velges, men ikke konkurrere med Neste. */
+.omvis-hopp{display:block;margin:8px auto 0;font-size:13px;color:var(--ink-3)}

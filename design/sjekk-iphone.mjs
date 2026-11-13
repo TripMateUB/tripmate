@@ -99,7 +99,7 @@ const skriv = m => {
   console.log("  utenfor:   ", m.utenfor.length ? m.utenfor.join(" | ") : "ingen");
 };
 
-for (const fane of ["idag", "program", "chat", "meg"]) {
+for (const fane of ["program", "chat", "turen", "meg"]) {
   await side.evaluate(f => document.querySelector(`#tabbar button[data-tab="${f}"]`).click(), fane);
   await side.waitForTimeout(220);
   skriv(await maal(fane));
@@ -112,7 +112,7 @@ for (const [navn, vei] of [
   ["kontakt", '[data-side="kontakt"]'], ["opprop", '[data-side="opprop"]']
 ]) {
   // Listene ligger under Meg.
-  await side.evaluate(() => document.querySelector('#tabbar button[data-tab="meg"]').click());
+  await side.evaluate(() => document.querySelector(`#tabbar button[data-tab="turen"]`).click());
   await side.waitForTimeout(250);
   await side.evaluate(v => document.querySelector(v).click(), vei);
   await side.waitForTimeout(700);
@@ -127,7 +127,7 @@ skriv(await maal("samtale"));
 await side.evaluate(() => document.querySelector("#convhead .t").click());
 await side.waitForTimeout(600);
 skriv(await maal("chatside"));
-await side.evaluate(() => document.querySelector("#tabbar button[data-tab=\"meg\"]").click());
+await side.evaluate(() => document.querySelector("#tabbar button[data-tab=\"turen\"]").click());
 await side.waitForTimeout(250);
 await side.evaluate(() => document.querySelector('[data-sheet="deltakere"]').click());
 await side.waitForTimeout(700);

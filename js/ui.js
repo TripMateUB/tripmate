@@ -7,7 +7,7 @@
 
 const UI = (() => {
 
-  const S = { trip: null, tab: "idag", day: null, openChat: null, loadingChat: false, trips: [], turerHentet: false, edit: false, offline: false, svarTil: null, kart: {}, sisteChat: null, tilBunn: false,
+  const S = { trip: null, tab: "program", day: null, openChat: null, loadingChat: false, trips: [], turerHentet: false, edit: false, offline: false, svarTil: null, kart: {}, sisteChat: null, tilBunn: false,
     nye: 0, sistAntall: 0, beholdSkroll: null, sveiper: false,
     side: null, varselStatus: null, varselEnheter: null, varselTest: null,
     folk: null, folkFeil: false, sisteVisning: null,
@@ -15,6 +15,7 @@ const UI = (() => {
     rom: null, romFeil: false,
     pakk: null, pakkFeil: false, setekart: null, seteFeil: false,
     kontakt: null, kontaktFeil: false, opprop: null, oppropFeil: false,
+    omvis: null,                            // {rolle, i} mens omvisningen gaar
     megTall: null,                          // tallene som står til høyre i Meg
     sideChat: null, chatFolk: null, ventende: 0, vedlegg: null, sender: false, sisteComposer: null };
 
@@ -398,7 +399,7 @@ const UI = (() => {
        senere, får hen reiselederens omvisning — det er en annen app å
        bruke. */
     if (!omvisningSett(trip.role === "leader" ? "leader" : "member")) {
-      setTimeout(() => { if (S.trip && S.trip.id === tripId && !S.side) sheetOmvisning(0); }, 700);
+      setTimeout(() => { if (S.trip && S.trip.id === tripId && !S.side) startOmvisning(); }, 700);
     }
     appKlar();
     if (!S.offline) {
@@ -452,25 +453,38 @@ const UI = (() => {
     return deler.length > 1 ? deler[1] : null;
   }
 
-  /* ───────────────── program ───────────────── */
-  /* ───────────────── I dag ─────────────────
-     Hjemskjermen. Den svarer på det ene spørsmålet alle har hele tiden:
-     hva skjer nå, og hvor. Programmet for hele turen ligger én fane
-     unna; her står bare dagen du er i. */
-  function viewIDag() {
+  /* ───────────────── program ─────────────────
+     Én skjerm, ikke to. «I dag» og «Program» svarte på det samme med
+     litt ulik innpakning — nå-kortet sto begge steder, dagens punkter
+     sto begge steder — og da måtte man vite hvilken av de to som var
+     stedet å se. Nå er det ett sted: nå-kortet øverst, dagsvelgeren
+     under, og hele dagen i full lengde.
+
+     Står du på en annen dag enn i dag, forsvinner nå-kortet. «Nå» er
+     ikke om lørdag, og et kort om torsdag over lørdagens program ville
+     sagt noe det ikke mente. */
+
+  /* Hilsenen navngir dagen og dagens ene faktum: hvilken by den er i. */
+  function dagTopp(d) {
+    const trip = S.trip;
+    const dagnavn = d
+      ? cap(new Date(d.date).toLocaleDateString("nb-NO", { weekday: "long" }))
+      : "Turen";
+    const nr = d ? trip.days.findIndex(x => x.date === d.date) + 1 : 0;
+    const sted = d ? dagensSted(d) : null;
+    const by = sted ? byen(trip.places[sted]) : null;
+    return `<div>
+      <h1 class="daghilsen">${esc(by ? `${dagnavn} i ${by}` : dagnavn)}</h1>
+      <p class="dagunder">${d ? `Dag ${nr} av ${trip.days.length}` : esc(trip.name)}</p>
+    </div>`;
+  }
+
+  /* Nå-kortet: det ene spørsmålet alle har hele tiden. Hva skjer nå,
+     og hvor. */
+  function naaKort() {
     const trip = S.trip;
     const ne = nextEvent(trip);
-    const idag = trip.days.find(x => x.date === today());
     const naa = new Date().toTimeString().slice(0, 5);
-
-    /* Hilsenen navngir dagen og dagens ene faktum. */
-    const dagnavn = idag
-      ? cap(new Date(idag.date).toLocaleDateString("nb-NO", { weekday: "long" }))
-      : "Turen";
-    const nr = idag ? trip.days.findIndex(x => x.date === idag.date) + 1 : 0;
-    const sted = idag ? dagensSted(idag) : null;
-    const by = sted ? byen(trip.places[sted]) : null;
-    const tittel = by ? `${dagnavn} i ${by}` : dagnavn;
 
     let kort = "";
     if (ne) {
@@ -498,7 +512,8 @@ const UI = (() => {
         </div>` : ""}
         <div class="knapper">
           ${p ? kartKnapp(p, "primar") : ""}
-          <button class="btn" data-tab="program">Hele dagen</button>
+          ${ne.day.date !== today() && trip.days.some(x => x.date === ne.day.date)
+            ? `<button class="btn" data-day="${esc(ne.day.date)}">Se den dagen</button>` : ""}
         </div>
       </section>`;
     } else {
@@ -506,32 +521,7 @@ const UI = (() => {
         <div class="hva" style="margin-top:2px">Turen er over</div>
         <div class="hvor">Programmet ligger her så lenge du er med.</div></section>`;
     }
-
-    const senere = idag ? idag.items.filter(i => !i.t || i.t > naa) : [];
-
-    return `
-      <div>
-        <h1 class="daghilsen">${esc(tittel)}</h1>
-        <p class="dagunder">${idag ? `Dag ${nr} av ${trip.days.length}` : esc(trip.name)}</p>
-      </div>
-      ${kort}
-      ${ventePaaDeg()}
-      ${senere.length ? `
-        <div>
-          <div class="eyebrow" style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px">
-            <span>Senere i dag</span>
-            <button class="linkbtn" style="font-size:12.5px" data-tab="program">Hele programmet</button>
-          </div>
-          ${senere.map(i => {
-            const p = i.place ? trip.places[i.place] : null;
-            return `<button class="post" data-item="${esc(i.id)}">
-              <span class="t">${i.t ? esc(i.t) : "—"}</span>
-              <span><span class="h">${esc(i.title)}${vaerMerke(i.place, idag.date, i.t, sted)}</span>
-                ${p ? `<span class="s">${esc(p.name)}</span>` : (i.note ? `<span class="s">${esc(i.note)}</span>` : "")}</span>
-              <span class="pil">${ICON.chev}</span></button>`;
-          }).join("")}
-        </div>` : ""}
-      `;
+    return kort;
   }
 
   /* ───────── det som venter på deg ─────────
@@ -815,33 +805,26 @@ const UI = (() => {
       ${leader ? `<p class="muted">Del turkoden <b class="mono">${esc(trip.code)}</b> med deltakerne så de kan bli med.</p>` : ""}`;
     }
 
+    const d = trip.days.find(x => x.date === S.day) || trip.days[0];
     const ne = nextEvent(trip);
-    const started = trip.days.some(d => d.date <= today());
-    let head = "";
+    const idag = trip.days.find(x => x.date === today());
+    const staarPaaIDag = Boolean(idag) && d.date === idag.date;
+    const started = trip.days.some(x => x.date <= today());
 
-    if (!ne) {
-      head = `<div class="countdown"><div class="eyebrow">Turen er ferdig</div>
-        <p class="muted" style="margin-top:6px">Programmet ligger her så lenge du er med på turen.</p></div>`;
-    } else if (!started) {
+    /* Toppen avhenger av hvor i turen du er, og hvilken dag du ser på.
+       Før avreise er nedtellingen det eneste som betyr noe. Under turen,
+       på dagens dato, er det nå-kortet. Står du på en annen dag, er det
+       bare den dagen — «nå» hører ikke hjemme over lørdagens program. */
+    let head = "";
+    if (!started) {
       const n = daysUntil(trip.days[0].date);
       head = `<div class="countdown"><div class="eyebrow">Avreise</div>
         <b>${n === 0 ? "I dag" : n === 1 ? "I morgen" : "Om " + n + " dager"}</b>
         <p class="muted" style="margin-top:4px;color:var(--ink-2)">Første punkt: ${esc(trip.days[0].items[0] ? trip.days[0].items[0].title : "ikke lagt inn")}</p></div>`;
-    } else {
-      const p = ne.item.place ? trip.places[ne.item.place] : null;
-      head = `<div class="nextup">
-        <div class="lbl">${ne.day.date === today() ? "Neste i dag" : "Neste · " + esc(ne.day.label)}</div>
-        <div class="t">${esc(ne.item.t)}</div>
-        <div class="w">${esc(ne.item.title)}${vaerMerke(ne.item.place, ne.day.date, ne.item.t, dagensSted(ne.day))}</div>
-        <div class="p">${p ? esc(p.name) : esc(ne.item.note || "")}</div>
-        ${p ? `<div class="acts">
-          ${kartKnapp(p, "solid")}
-          <button class="btn" data-sheet="place" data-place="${esc(ne.item.place)}">Detaljer</button>
-        </div>` : ""}
-      </div>`;
+    } else if (staarPaaIDag) {
+      head = naaKort() + ventePaaDeg();
     }
 
-    const d = trip.days.find(x => x.date === S.day) || trip.days[0];
     const chips = trip.days.map(x =>
       `<button class="chip" aria-pressed="${x.date === d.date}" data-day="${esc(x.date)}">${esc(x.chip)}<span>${esc(x.num)}</span></button>`
     ).join("") + (leader ? `<button class="chip" data-sheet="addday" style="border-style:dashed">+ Dag<span>ny dato</span></button>` : "");
@@ -875,6 +858,7 @@ const UI = (() => {
     }).join("") : `<p class="muted" style="padding:16px 0;text-align:center">Ingen punkter denne dagen.</p>`;
 
     return `
+      ${dagTopp(d)}
       ${head}
       <div class="chips">${chips}</div>
       <div>
@@ -1395,7 +1379,7 @@ const UI = (() => {
     try {
       await Api.setIgnorer(slag, id, skjul);
       await openTrip(S.trip.id);
-      S.tab = "meg"; render();
+      S.tab = "turen"; render();
       toast(skjul ? "Skjult. Du finner den under «Skjulte»." : "Tatt fram igjen.");
     } catch {
       toast("Klarte ikke lagre. Har du kjørt siste SQL?");
@@ -1457,6 +1441,102 @@ const UI = (() => {
     </div>`;
   }
 
+  /* Hva mangler i turen? Lista lå øverst i Meg, men den handler om
+     turen og ikke om kontoen din, og den er reiselederens — derfor
+     står den nå først på fanen Turen, der resten av det samme er. */
+  function maaOrdnes() {
+    const o = oppgaver();
+    const skjulte = oppgaver(true).filter(x => x.skjult);
+    if (!o.length && !skjulte.length) return "";
+
+    const skjultLenke = skjulte.length
+      ? `<button class="linkbtn" style="font-size:13px" data-sheet="skjulte">
+           ${skjulte.length} skjult${skjulte.length === 1 ? "" : "e"} — se dem</button>`
+      : "";
+
+    // Er alt ordnet, skal lenken til de skjulte fortsatt stå igjen.
+    // Ellers forsvinner veien tilbake sammen med selve lista.
+    if (!o.length) {
+      return `<div class="ordnes">
+        <div class="eyebrow" style="margin-bottom:8px;color:var(--moss)">Alt er i orden</div>
+        <div class="card pad" style="padding-block:14px;border-left:3px solid var(--moss)">
+          <p class="muted" style="margin:0">${skjulte.length
+            ? "Ingenting venter på deg. Det du har krysset av ligger under."
+            : "Alle steder har adresse, og alle dager har hotell."}</p>
+        </div>
+        ${skjultLenke}
+      </div>`;
+    }
+
+    return `<div class="ordnes">
+      <div class="eyebrow" style="margin-bottom:8px;color:var(--amber)">Må ordnes · ${o.length}</div>
+      <div class="card pad" style="border-left:3px solid var(--amber)">
+        <div class="list">${o.map(x => `<div class="oppgave">
+          <button class="listrow" ${x.side
+            ? `data-side="${esc(x.side)}"`
+            : `data-sheet="${esc(x.sheet)}" data-place="${esc(x.id)}" data-day="${esc(x.id)}"`}>
+            <div class="grow"><div class="nm">${esc(x.hva)}</div><div class="sub">${esc(x.hvorfor)}</div></div>
+            <span class="chev">${ICON.chev}</span>
+          </button>
+          ${x.slag === "day" || x.slag === "place"
+            ? `<button class="linkbtn skjulknapp" data-skjul="${esc(x.slag)}" data-skjulid="${esc(x.id)}">ikke nødvendig</button>`
+            : ""}
+        </div>`).join("")}</div>
+      </div>
+      ${o.some(x => /Fant ikke posisjonen/.test(x.hva))
+        ? S.vaerJobber
+          ? `<p class="muted" style="margin:10px 0 0;font-size:13px">${prikker()} Slår opp adressene. Dette tar et halvt minutt — kartet tåler ett spørsmål i sekundet.</p>`
+          : `<button class="linkbtn" style="font-size:13px" data-vaerigjen="1">Slå opp adressene på nytt</button>`
+        : ""}
+      ${skjultLenke}
+    </div>`;
+  }
+
+  /* ───────────────── Turen ─────────────────
+     Alt som gjelder turen, men ikke programmet: det praktiske, folkene,
+     og koden som slipper dem inn. Det lå i Meg før, nederst mellom
+     e-postadresse og kartvalg — og da måtte man vite at det var der.
+
+     Må ordnes står øverst. Det er reiselederens liste over hva som
+     mangler i turen, og den hører hjemme her og ikke blant kontoen. */
+  function viewTuren() {
+    const trip = S.trip;
+    const leder = trip.role === "leader";
+    return `
+      ${maaOrdnes()}
+      ${praktisk()}
+
+      <div>
+        <div class="eyebrow" style="margin-bottom:8px">Turen</div>
+        <div class="gruppe"><div class="list">
+          <button class="listrow" data-sheet="deltakere">
+            <span class="rikon">${ICON.folk}</span>
+            <div class="grow"><div class="nm">Deltakere${S.ventende ? '<span class="prikkmerke"></span>' : ""}</div></div>
+            <span class="verdi"${S.ventende ? ' style="color:var(--amber)"' : ""}>${S.ventende
+              ? `${S.ventende} venter` : ""}</span>
+            <span class="chev">${ICON.chev}</span></button>
+
+          ${leder ? `<button class="listrow" data-sheet="endretur">
+            <span class="rikon grunn">${ICON.blyant}</span>
+            <div class="grow"><div class="nm">Navn og dato</div></div>
+            <span class="verdi">${esc(trip.dates || trip.name)}</span>
+            <span class="chev">${ICON.chev}</span></button>` : ""}
+
+          <button class="listrow" data-copy="${esc(trip.code)}">
+            <span class="rikon grunn">${ICON.nokkel}</span>
+            <div class="grow"><div class="nm">Turkode</div>
+              <div class="sub">Trykk for å kopiere</div></div>
+            <b class="mono" style="font-size:17px;letter-spacing:.09em">${esc(trip.code)}</b></button>
+
+          ${leder ? `<button class="listrow" data-sheet="byttkode">
+            <span class="rikon gul">${ICON.spark}</span>
+            <div class="grow"><div class="nm">Ny turkode</div>
+              <div class="sub">Når koden har kommet ut til flere enn den skulle</div></div>
+            <span class="chev">${ICON.chev}</span></button>` : ""}
+        </div></div>
+      </div>`;
+  }
+
   function viewMe() {
     const p = Api.getProfile();
     const tall = S.megTall;              // null til de er hentet
@@ -1476,54 +1556,6 @@ const UI = (() => {
       : `<p class="muted" style="padding:12px 0">Henter turene dine…</p>`;
 
     return `
-      ${(() => {
-        const o = oppgaver();
-        const skjulte = oppgaver(true).filter(x => x.skjult);
-        if (!o.length && !skjulte.length) return "";
-
-        const skjultLenke = skjulte.length
-          ? `<button class="linkbtn" style="font-size:13px" data-sheet="skjulte">
-               ${skjulte.length} skjult${skjulte.length === 1 ? "" : "e"} — se dem</button>`
-          : "";
-
-        // Er alt ordnet, skal lenken til de skjulte fortsatt stå igjen.
-        // Ellers forsvinner veien tilbake sammen med selve lista.
-        if (!o.length) {
-          return `<div>
-            <div class="eyebrow" style="margin-bottom:8px;color:var(--moss)">Alt er i orden</div>
-            <div class="card pad" style="padding-block:14px;border-left:3px solid var(--moss)">
-              <p class="muted" style="margin:0">${skjulte.length
-                ? "Ingenting venter på deg. Det du har krysset av ligger under."
-                : "Alle steder har adresse, og alle dager har hotell."}</p>
-            </div>
-            ${skjultLenke}
-          </div>`;
-        }
-
-        return `<div>
-          <div class="eyebrow" style="margin-bottom:8px;color:var(--amber)">Må ordnes · ${o.length}</div>
-          <div class="card pad" style="border-left:3px solid var(--amber)">
-            <div class="list">${o.map(x => `<div class="oppgave">
-              <button class="listrow" ${x.side
-                ? `data-side="${esc(x.side)}"`
-                : `data-sheet="${esc(x.sheet)}" data-place="${esc(x.id)}" data-day="${esc(x.id)}"`}>
-                <div class="grow"><div class="nm">${esc(x.hva)}</div><div class="sub">${esc(x.hvorfor)}</div></div>
-                <span class="chev">${ICON.chev}</span>
-              </button>
-              ${x.slag === "day" || x.slag === "place"
-                ? `<button class="linkbtn skjulknapp" data-skjul="${esc(x.slag)}" data-skjulid="${esc(x.id)}">ikke nødvendig</button>`
-                : ""}
-            </div>`).join("")}</div>
-          </div>
-          ${o.some(x => /Fant ikke posisjonen/.test(x.hva))
-            ? S.vaerJobber
-              ? `<p class="muted" style="margin:10px 0 0;font-size:13px">${prikker()} Slår opp adressene. Dette tar et halvt minutt — kartet tåler ett spørsmål i sekundet.</p>`
-              : `<button class="linkbtn" style="font-size:13px" data-vaerigjen="1">Slå opp adressene på nytt</button>`
-            : ""}
-          ${skjultLenke}
-        </div>`;
-
-      })()}
       ${installkort()}
 
       <div class="megkort">
@@ -1535,42 +1567,15 @@ const UI = (() => {
         ${Api.erAnonym() ? '<span class="tag amber">gjest</span>' : ""}
       </div>
 
-      ${praktisk()}
 
       <div>
-        <div class="eyebrow" style="margin-bottom:8px">Turen</div>
+        <div class="eyebrow" style="margin-bottom:8px">Appen</div>
         <div class="gruppe"><div class="list">
-          <button class="listrow" data-sheet="deltakere">
-            <span class="rikon">${ICON.folk}</span>
-            <div class="grow"><div class="nm">Deltakere${S.ventende ? '<span class="prikkmerke"></span>' : ""}</div></div>
-            <span class="verdi"${S.ventende ? ' style="color:var(--amber)"' : ""}>${S.ventende
-              ? `${S.ventende} venter` : ""}</span>
-            <span class="chev">${ICON.chev}</span></button>
-
           <button class="listrow" data-sheet="varsler">
             <span class="rikon gul">${ICON.bjelle}</span>
             <div class="grow"><div class="nm">Varsler${varslerAv ? '<span class="prikkmerke"></span>' : ""}</div></div>
             <span class="verdi"${varslerAv ? ' style="color:var(--amber)"' : ""}>${esc(varselTekst)}</span>
             <span class="chev">${ICON.chev}</span></button>
-
-
-          ${trip.role === "leader" ? `<button class="listrow" data-sheet="endretur">
-            <span class="rikon grunn">${ICON.blyant}</span>
-            <div class="grow"><div class="nm">Navn og dato</div></div>
-            <span class="verdi">${esc(trip.dates || trip.name)}</span>
-            <span class="chev">${ICON.chev}</span></button>` : ""}
-
-          <button class="listrow" data-copy="${esc(trip.code)}">
-            <span class="rikon grunn">${ICON.nokkel}</span>
-            <div class="grow"><div class="nm">Turkode</div>
-              <div class="sub">Trykk for å kopiere</div></div>
-            <b class="mono" style="font-size:17px;letter-spacing:.09em">${esc(trip.code)}</b></button>
-
-          ${trip.role === "leader" ? `<button class="listrow" data-sheet="byttkode">
-            <span class="rikon gul">${ICON.spark}</span>
-            <div class="grow"><div class="nm">Ny turkode</div>
-              <div class="sub">Når koden har kommet ut til flere enn den skulle</div></div>
-            <span class="chev">${ICON.chev}</span></button>` : ""}
 
           <button class="listrow" data-sheet="omvisning">
             <span class="rikon mose">${ICON.info}</span>
@@ -1817,6 +1822,7 @@ const UI = (() => {
     // Fanerada er i veien når du skriver i en samtale.
     $("tabbar").hidden = Boolean(conv);
     tegnFaner();
+    tegnOmvisning();
     maalOey();
   }
 
@@ -1826,8 +1832,14 @@ const UI = (() => {
      bygde vi den på nytt for hver tegning, fantes det ikke noe for
      pilla å gli fra — og det er pilla som viser hvor du kom fra og hvor
      du havnet. */
-  const FANER = [["idag","I dag","hjem"], ["program","Program","cal"],
-                 ["chat","Chat","chat"], ["meg","Meg","me"]];
+  /* Fire faner, og hver av dem svarer på sitt eget spørsmål: hva skjer,
+     hva sier folk, hva gjelder for meg på turen, og hvem er jeg.
+
+     «I dag» og «Program» var to faner om det samme, og plassen de ga
+     fra seg gikk til «Turen» — der pakkeliste, plass, rom og nødnummer
+     nå ligger, i stedet for nede i Meg mellom innstillingene. */
+  const FANER = [["program","Program","cal"], ["chat","Chat","chat"],
+                 ["turen","Turen","koffert"], ["meg","Meg","me"]];
 
   function tegnFaner() {
     const bar = $("tabbar");
@@ -1842,7 +1854,10 @@ const UI = (() => {
     // Merket på Meg teller både ting reiselederen må ordne og at varsler
     // ikke er slått på — begge deler er noe som venter på deg.
     const tall = {
-      meg: oppgaver().length + (varslerErAv() ? 1 : 0) + (S.ventende ? 1 : 0),
+      // Merket sitter der jobben er: det turen mangler hoerer til Turen,
+      // og varslene som ikke er paa, til Meg.
+      turen: oppgaver().length + (S.ventende ? 1 : 0),
+      meg: varslerErAv() ? 1 : 0,
       chat: Api.antallUleste(S.trip.id)
     };
     visFane(S.tab);
@@ -1920,12 +1935,12 @@ const UI = (() => {
     if (!S.trip || (S.megTall && !tvang)) return;
     Api.megTall(S.trip.id).then(t => {
       S.megTall = t;
-      if (S.trip && (S.tab === "meg" || S.tab === "idag") && !S.side && !S.openChat) render();
+      if (S.trip && (S.tab === "meg" || S.tab === "turen" || S.tab === "program") && !S.side && !S.openChat) render();
     }).catch(() => {});
   }
 
   function byttFane(id) {
-    if (id === "meg" || id === "idag") hentMegTall();
+    if (id === "meg" || id === "turen" || id === "program") hentMegTall();
     if (S.tab === id && !S.openChat && !S.side) return;
     S.tab = id; S.openChat = null; S.side = null;
     render();
@@ -3971,7 +3986,7 @@ const UI = (() => {
         const ny = await Api.byttTurkode(S.trip.id);
         await openTrip(S.trip.id);
         closeSheet();
-        S.tab = "meg"; render();
+        S.tab = "turen"; render();
         toast("Ny turkode: " + ny);
       } catch (e) {
         btn.disabled = false; btn.textContent = "Lag en ny kode";
@@ -3998,28 +4013,70 @@ const UI = (() => {
 
   /* ───────── omvisning ─────────
      En tur settes opp én gang, av en som aldri har gjort det før, og
-     ofte kvelden før avreise. Appen pekte ikke på noe av seg selv: alt
-     sto der, men man måtte finne det.
+     ofte kvelden før avreise. Den første omvisningen var fire sider
+     tekst som fortalte hvor ting lå — og da måtte man lete likevel,
+     bare med en beskrivelse i hodet i stedet for uten.
 
-     Fire kort, ett spørsmål hver, og en knapp som går dit. Reiselederen
-     og deltakeren får ikke de samme — de leter etter ulike ting. Den
-     vises én gang av seg selv, og ligger i Meg etterpå.
+     Denne går veien selv. Hvert steg bytter til riktig fane, ruller
+     fram det den snakker om, legger en ring rundt det, og dimmer
+     resten. Du ser hvor det er mens du får vite hva det er, og neste
+     gang du skal dit, husker fingeren veien.
 
-     Flagget er lokalt med vilje: den hører til telefonen, ikke til
-     kontoen. Bytter du telefon, er appen ny igjen. */
+     Målet er en velger mot den ekte appen. Finner den ingenting — en
+     tur uten program har ingen dagsvelger — hopper steget over seg
+     selv i stedet for å peke på ingenting. */
   const OMVISNING = {
     leader: [
-      { h: "Du setter opp turen", t: "Program er dagene og punktene. Du kan lese inn et PDF-hefte, eller legge inn dag for dag. Hvert punkt kan ha et sted, og da får deltakerne veibeskrivelse og værmelding.", knapp: "Åpne Program", tab: "program" },
-      { h: "Appen sier hva som mangler", t: "Står et sted uten adresse, eller en dag uten hotell, dukker det opp under «Må ordnes» i Meg. Er noe ikke nødvendig, krysser du det av, og da er det borte.", knapp: "Åpne Meg", tab: "meg" },
-      { h: "Det praktiske ligger samlet", t: "Pakkeliste, sitteplasser, rom og nødnummer står under Praktisk i Meg. Du bestemmer per kjøretøy og for rommene om deltakerne velger selv eller om du fordeler.", knapp: "Se Praktisk", tab: "meg" },
-      { h: "Turkoden er nøkkelen", t: "Deltakerne blir med ved å skrive navnet sitt og koden. Kommer koden ut til flere enn den skulle, lager du en ny i Meg. Du kan også kreve at du godkjenner hver som blir med.", knapp: "Åpne Deltakere", side: "deltakere" },
-      { h: "Chatten kan være en tavle", t: "En chat er åpen for hele turen, privat for dem du legger til, eller en oppslagstavle der bare reiselederne skriver. Skriver noen «møt på hotellet 18:30», blir det en veibeskrivelse av seg selv.", knapp: "Åpne Chat", tab: "chat" }
+      { tab: "program", maal: ".naakort",
+        h: "Her står det som skjer nå",
+        t: "Punktet som pågår eller er neste, med adresse og en knapp rett til kartet." },
+      { tab: "program", maal: ".chips",
+        h: "Bla mellom dagene her",
+        t: "Trykk på en dag, så bytter programmet under. Nå-kortet står bare på dagens dato." },
+      { tab: "program", maal: '[data-sheet="additem"]',
+        h: "Slik legger du inn et punkt",
+        t: "Tid, tittel og sted. Med et sted følger kart og vær. Har du heftet som PDF, leses hele programmet inn på en gang." },
+      { tab: "turen", maal: ".ordnes",
+        h: "Appen sier hva som mangler",
+        t: "Et sted uten adresse, en dag uten hotell — det dukker opp her. Er det unødvendig, krysser du det av." },
+      { tab: "turen", maal: '[data-side="seter"]',
+        h: "Sitteplasser, ett kjøretøy av gangen",
+        t: "Hvert kjøretøy har sin dag og sitt kart. Du bestemmer om deltakerne velger selv, eller om du fordeler." },
+      { tab: "turen", maal: '[data-side="rom"]',
+        h: "Rom virker på samme måte",
+        t: "Legg inn rommene, og la appen fylle de ledige sengene. To brytere styrer om deltakerne kan flytte seg." },
+      { tab: "turen", maal: '[data-side="kontakt"]',
+        h: "Nødnummer ligger alltid tilgjengelig",
+        t: "Deg, den andre reiselederen, skolen. Ett trykk for å ringe, og det virker uten nett." },
+      { tab: "turen", maal: '[data-side="opprop"]',
+        h: "Opprop på rasteplassen",
+        t: "Hak av navnene. De som mangler står øverst. Bare reiseledere ser lista." },
+      { tab: "turen", maal: "[data-copy]",
+        h: "Turkoden slipper folk inn",
+        t: "Del den med klassen. Kommer den ut til flere enn den skulle, lager du en ny under." }
     ],
     member: [
-      { h: "«I dag» svarer på hva nå", t: "Øverst står det som skjer nå eller er neste, med adressen og en knapp rett til kartet. Venter noe på deg — en plass du ikke har valgt, et bytte noen har spurt om — står det her.", knapp: "Åpne I dag", tab: "idag" },
-      { h: "Program er hele turen", t: "Bla mellom dagene øverst. Hvert punkt med et sted har kart og værmelding, og noen punkter har påmelding.", knapp: "Åpne Program", tab: "program" },
-      { h: "Din plass og ditt rom", t: "Under Praktisk i Meg: pakkelista du krysser av for deg selv, plassen din i bussen eller på toget, rommet ditt, og nummeret du ringer hvis noe skjer.", knapp: "Se Praktisk", tab: "meg" },
-      { h: "Chat og varsler", t: "Hele turen har en chat, og du kan lage egne med dem du vil. Slå på varsler i Meg, ellers er telefonen stille når reiselederen skriver noe viktig.", knapp: "Åpne Chat", tab: "chat" }
+      { tab: "program", maal: ".naakort",
+        h: "Her står det som skjer nå",
+        t: "Punktet som pågår eller er neste, med adresse og en knapp rett til kartet." },
+      { tab: "program", maal: ".chips",
+        h: "Bla mellom dagene her",
+        t: "Trykk på en dag for å se programmet for den." },
+      { tab: "program", maal: ".tl .ev",
+        h: "Trykk på et punkt for detaljene",
+        t: "Adresse, kart og vær. Har punktet påmelding, melder du deg på herfra." },
+      { tab: "turen", maal: '[data-side="pakk"]',
+        h: "Pakkelista er din egen",
+        t: "Du krysser av for deg selv, og ingen andre ser det. Egne ting legger du til nederst." },
+      { tab: "turen", maal: '[data-side="seter"]',
+        h: "Plassen din i bussen",
+        t: "Velg plass, eller se hvilken du har fått. Vil du sitte et annet sted, spør du den som sitter der." },
+      { tab: "turen", maal: '[data-side="kontakt"]',
+        h: "Nummeret du ringer hvis noe skjer",
+        t: "Reiselederne og skolen, ett trykk unna. Lista virker uten nett." },
+      { tab: "meg", maal: '[data-sheet="varsler"]',
+        h: "Slå på varsler her",
+        t: "Uten varsler er telefonen stille når reiselederen skriver noe viktig." }
     ]
   };
 
@@ -4030,24 +4087,123 @@ const UI = (() => {
     catch { return true; }          // uten lager viser vi den ikke om og om igjen
   }
 
-  function sheetOmvisning(steg) {
-    const rolle = S.trip.role === "leader" ? "leader" : "member";
-    const kort = OMVISNING[rolle];
+  const omvisRolle = () => (S.trip && S.trip.role === "leader" ? "leader" : "member");
+  const omvisSteg = () => (S.omvis ? OMVISNING[S.omvis.rolle][S.omvis.i] : null);
+
+  function startOmvisning() {
+    const rolle = omvisRolle();
     try { localStorage.setItem(omvisningNokkel(rolle), "1"); } catch { /* uviktig */ }
+    closeSheet();
+    S.omvis = { rolle, i: 0 };
+    gaaTilOmvisSteg(0);
+  }
 
-    const i = Math.max(0, Math.min(steg, kort.length - 1));
-    const k = kort[i];
-    const siste = i === kort.length - 1;
+  function avsluttOmvisning() {
+    S.omvis = null;
+    $("omvis").hidden = true;
+    render();
+  }
 
-    openSheet(`<p class="eyebrow" style="margin-bottom:6px">Omvisning · ${i + 1} av ${kort.length}</p>
-      <h3>${esc(k.h)}</h3>
-      <p class="lede">${esc(k.t)}</p>
-      <div class="stack">
-        <button class="btn primary big" data-omvisning="${siste ? "ferdig" : i + 1}">${
-          siste ? "Ferdig" : "Neste"}</button>
-        <button class="btn" data-omvisning="gaa:${i}">${esc(k.knapp)}</button>
+  /* Hvert steg kan bytte fane. Da må alt som ligger over fanen lukkes
+     først — står et ark åpent, peker ringen på noe bak det. */
+  function gaaTilOmvisSteg(i) {
+    const liste = OMVISNING[S.omvis.rolle];
+    if (i < 0 || i >= liste.length) return avsluttOmvisning();
+    S.omvis.i = i;
+    const steg = liste[i];
+    if (steg.tab && (S.tab !== steg.tab || S.side || S.openChat)) {
+      S.side = null;
+      S.openChat = null;
+      S.tab = steg.tab;
+    }
+    render();
+  }
+
+  /* Tegner ringen og kortet etter at skjermen er ferdig. Måler den ekte
+     knappen, så markeringen sitter der knappen faktisk er — ikke der vi
+     trodde den skulle være da teksten ble skrevet. */
+  function tegnOmvisning() {
+    const lag = $("omvis");
+    const steg = omvisSteg();
+    if (!steg) { lag.hidden = true; return; }
+
+    const liste = OMVISNING[S.omvis.rolle];
+    const siste = S.omvis.i === liste.length - 1;
+    lag.hidden = false;
+
+    $("omvisKort").innerHTML = `
+      <p class="omvis-teller">Omvisning · ${S.omvis.i + 1} av ${liste.length}</p>
+      <h3>${esc(steg.h)}</h3>
+      <p>${esc(steg.t)}</p>
+      <div class="omvis-knapper">
+        ${S.omvis.i ? `<button class="btn" data-omvis="forrige">Tilbake</button>` : ""}
+        <button class="btn primary" data-omvis="neste">${siste ? "Ferdig" : "Neste"}</button>
       </div>
-      <button class="btn close" data-close>${siste ? "Lukk" : "Hopp over"}</button>`);
+      ${siste ? "" : `<button class="linkbtn omvis-hopp" data-omvis="slutt">Hopp over resten</button>`}`;
+
+    plasserOmvisning(steg);
+  }
+
+  /* Ringen legges rundt målet, og kortet på den siden det er plass.
+     Er målet utenfor skjermen, rulles det fram først — og da må vi måle
+     en gang til, for det har nettopp flyttet seg. */
+  function plasserOmvisning(steg, andreForsok) {
+    const ring = $("omvisRing"), kort = $("omvisKort"), app = $("appScreen");
+    const maal = steg.maal ? $("screen").querySelector(steg.maal)
+                          || document.querySelector(steg.maal) : null;
+
+    // Ingenting å peke på — en tur uten program har ingen dagsvelger.
+    // Da er steget uten mening, og vi går videre i stedet for å dimme
+    // skjermen rundt et tomrom.
+    if (!maal) {
+      ring.classList.add("tom");
+      ring.removeAttribute("style");
+      kort.classList.add("midt");
+      kort.style.top = ""; kort.style.bottom = "";
+      return;
+    }
+    ring.classList.remove("tom");
+    kort.classList.remove("midt");
+
+    const sk = $("screen").getBoundingClientRect();
+
+    /* Ligger målet utenfor det synlige feltet, rulles det fram først.
+       Rullingen skjer med en gang, så målingen under gjelder den nye
+       posisjonen. Bare ett forsøk: ruller vi i ring, står omvisningen
+       fast og knappene svarer ikke. */
+    if (!andreForsok) {
+      const f = maal.getBoundingClientRect();
+      if (f.top < sk.top + 8 || f.bottom > sk.bottom - 8) {
+        maal.scrollIntoView({ block: "center", behavior: "auto" });
+        return plasserOmvisning(steg, true);
+      }
+    }
+
+    const r = maal.getBoundingClientRect();
+    const a = app.getBoundingClientRect();
+    const luft = 6;
+    ring.style.left = (r.left - a.left - luft) + "px";
+    ring.style.top = (r.top - a.top - luft) + "px";
+    ring.style.width = (r.width + luft * 2) + "px";
+    ring.style.height = (r.height + luft * 2) + "px";
+
+    /* Kortet legger seg på den siden av ringen der det får plass. Får
+       det plass på begge, velger vi under — da leser man nedover, slik
+       man gjør ellers. Får det plass på ingen av dem, legger det seg
+       der det er mest rom og klemmes inn på skjermen; ringen kan da
+       ligge delvis bak kortet, men teksten er det viktigste. */
+    const h = kort.getBoundingClientRect().height || 240;
+    const marg = 14, kant = 10;
+    const over = (r.top - a.top) - marg - kant;
+    const under = (a.bottom - r.bottom) - marg - kant;
+
+    if (under >= h || under >= over) {
+      kort.style.top = Math.min(r.bottom - a.top + marg, a.height - h - kant) + "px";
+      kort.style.bottom = "auto";
+    } else {
+      kort.style.bottom = Math.min(a.bottom - r.top + marg, a.height - h - kant) + "px";
+      kort.style.top = "auto";
+    }
   }
 
   function sheetNyttPakk(egen) {
@@ -4772,7 +4928,7 @@ const UI = (() => {
         closeSheet();
         await openTrip(t.id);
         S.trips = await Api.myTrips().catch(() => S.trips);
-        S.tab = "meg"; render();
+        S.tab = "turen"; render();
         toast("Turen er oppdatert.");
       } catch (err) {
         knapp.disabled = false; knapp.textContent = "Lagre";
@@ -4929,7 +5085,7 @@ const UI = (() => {
   });
 
   document.addEventListener("click", async e => {
-    const t = e.target.closest("[data-tab],[data-side],[data-pakk],[data-slettpakk],[data-sete],[data-setevalg],[data-nykj],[data-endrekj],[data-slettkj],[data-vaerigjen],[data-svarbytte],[data-avgjorbytte],[data-trekkbytte],[data-nyttrom],[data-endrerom],[data-slettrom],[data-fyllrom],[data-fyllalle],[data-settrom],[data-romvalg],[data-utavrom],[data-bytterom],[data-svarrombytte],[data-avgjorrombytte],[data-trekkrombytte],[data-nykontakt],[data-endrekontakt],[data-slettkontakt],[data-nyttopprop],[data-hake],[data-lukkopprop],[data-omvisning],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-msgmeny],[data-chat],[data-paa],[data-slettchat],[data-bilde],[data-slettbilde],[data-bvlukk],[data-bvmeny],[data-lagrebilde],[data-kopimeld],[data-deltekst],[data-chatside],[data-cmadd],[data-cmdel],[data-cmleave],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn,#skjulInstall,#installKnapp");
+    const t = e.target.closest("[data-tab],[data-side],[data-pakk],[data-slettpakk],[data-sete],[data-setevalg],[data-nykj],[data-endrekj],[data-slettkj],[data-vaerigjen],[data-svarbytte],[data-avgjorbytte],[data-trekkbytte],[data-nyttrom],[data-endrerom],[data-slettrom],[data-fyllrom],[data-fyllalle],[data-settrom],[data-romvalg],[data-utavrom],[data-bytterom],[data-svarrombytte],[data-avgjorrombytte],[data-trekkrombytte],[data-nykontakt],[data-endrekontakt],[data-slettkontakt],[data-nyttopprop],[data-hake],[data-lukkopprop],[data-omvis],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-msgmeny],[data-chat],[data-paa],[data-slettchat],[data-bilde],[data-slettbilde],[data-bvlukk],[data-bvmeny],[data-lagrebilde],[data-kopimeld],[data-deltekst],[data-chatside],[data-cmadd],[data-cmdel],[data-cmleave],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn,#skjulInstall,#installKnapp");
     if (!t) return;
 
     if (t.id === "joinTilbake") { S.fraStart = false; return visAuth("start"); }
@@ -5175,18 +5331,11 @@ const UI = (() => {
     }
 
     // ───── omvisning ─────
-    if (t.dataset.omvisning) {
-      const v = t.dataset.omvisning;
-      if (v === "ferdig") return closeSheet();
-      if (v.startsWith("gaa:")) {
-        const rolle = S.trip.role === "leader" ? "leader" : "member";
-        const k = OMVISNING[rolle][Number(v.slice(4))];
-        closeSheet();
-        if (k && k.side === "deltakere") return aapneDeltakere();
-        if (k && k.tab) return byttFane(k.tab);
-        return;
-      }
-      return sheetOmvisning(Number(v));
+    if (t.dataset.omvis) {
+      const v = t.dataset.omvis;
+      if (v === "slutt") return avsluttOmvisning();
+      if (!S.omvis) return;
+      return gaaTilOmvisSteg(S.omvis.i + (v === "forrige" ? -1 : 1));
     }
 
     // ───── nødnummer ─────
@@ -5259,7 +5408,7 @@ const UI = (() => {
       const svar = await Api.lastVaer(S.trip.id, true);
       S.vaerJobber = false;
       try { await openTrip(S.trip.id); } catch {}
-      S.tab = "meg"; render();
+      S.tab = "turen"; render();
       if (svar && svar.ok === false) return toast(svar.grunn);
       const igjen = oppgaver().filter(o => /Fant ikke posisjonen/.test(o.hva)).length;
       toast(igjen ? `${igjen} står fortsatt uten posisjon.` : "Alle stedene har posisjon nå.");
@@ -5456,7 +5605,7 @@ const UI = (() => {
     if (t.dataset.sheet === "varsler") { closeSheet(); return aapneVarsler(); }
     if (t.dataset.sheet === "varselinfo") return sheetVarselInfo();
     if (t.dataset.sheet === "byttkode") return sheetByttKode();
-    if (t.dataset.sheet === "omvisning") return sheetOmvisning(0);
+    if (t.dataset.sheet === "omvisning") return startOmvisning();
     if (t.dataset.sheet === "slettkonto") return sheetSlettKonto();
     if (t.dataset.sheet === "kartvalg") return sheetKartvalg();
     if (t.dataset.sheet === "endretur") return sheetEndreTur();
@@ -5569,9 +5718,9 @@ const UI = (() => {
   /* Skjermen til én fane. Trengs to steder: når fanen tegnes, og når
      naboen skal ligge klar ved siden av under et sveip. */
   function visningFor(fane) {
-    return fane === "idag" ? viewIDag()
-         : fane === "program" ? viewProgram()
+    return fane === "program" ? viewProgram()
          : fane === "chat" ? viewChat()
+         : fane === "turen" ? viewTuren()
          : viewMe();
   }
 

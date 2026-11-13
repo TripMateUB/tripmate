@@ -27,22 +27,41 @@ const trykkSiste = async v => {
 };
 const antall = v => side.$$eval(v, e => e.length).catch(() => 0);
 
-/* ───── de praktiske listene ligger under Meg, ikke på I dag ─────
-   På en dag med tolv punkter sto Praktisk under bretten. «I dag» er
-   dagen; listene bor i Meg, og hjemskjermen viser bare det som venter
-   på at du gjør noe. */
-// Radene som fortsatt kan stå på I dag, er de som venter på deg. Selve
-// Praktisk-gruppa skal ikke være der.
-await sjekk("I dag har ikke Praktisk-gruppa", async () =>
-  !/PRAKTISK/i.test(await side.$eval("#screen", e => e.textContent)));
-await sjekk("I dag sier hva som venter på deg", async () =>
+/* ───── fire faner, og hver av dem svarer på sitt ─────
+   «I dag» og «Program» var to skjermer om det samme. Nå er det én:
+   nå-kortet øverst, dagsvelgeren under, hele dagen i full lengde.
+   Plassen som ble ledig gikk til Turen, der det praktiske ligger. */
+await sjekk("fire faner", async () => await antall("#tabbar button") === 4);
+await sjekk("fanene heter det de skal", async () =>
+  (await side.$$eval("#tabbar button", e => e.map(x => x.dataset.tab).join(",")))
+    === "program,chat,turen,meg");
+await sjekk("Program åpner på dagens dato", async () =>
+  /Dag \d+ av \d+/.test(await side.$eval(".dagunder", e => e.textContent)));
+await sjekk("nå-kortet står på Program", async () => await side.$(".naakort") !== null);
+await sjekk("dagsvelgeren står på samme skjerm", async () => await side.$(".chips") !== null);
+await sjekk("det som venter på deg står der", async () =>
   /VENTER PÅ DEG/i.test(await side.$eval("#screen", e => e.textContent)));
-await sjekk("I dag har ingen dagstripe lenger", async () => await side.$(".stripe") === null);
-await trykk('#tabbar button[data-tab="meg"]');
-await sjekk("Meg har rad for pakkeliste", async () => await side.$('[data-side="pakk"]') !== null);
-await sjekk("Meg har rad for sitteplasser", async () => await side.$('[data-side="seter"]') !== null);
-await sjekk("Meg har rad for nødnummer", async () => await side.$('[data-side="kontakt"]') !== null);
+await sjekk("ingen dagstripe lenger", async () => await side.$(".stripe") === null);
+await sjekk("Program har ikke Praktisk-gruppa", async () =>
+  !/PRAKTISK/i.test(await side.$eval("#screen", e => e.textContent)));
+
+/* På en annen dag enn i dag er «nå» ikke lenger noe svar. */
+await side.evaluate(() => [...document.querySelectorAll(".chip")].slice(-2)[0].click());
+await side.waitForTimeout(400);
+await sjekk("nå-kortet forsvinner på en annen dag", async () => await side.$(".naakort") === null);
+await sjekk("hilsenen følger dagen du ser på", async () =>
+  /Dag \d+ av \d+/.test(await side.$eval(".dagunder", e => e.textContent)));
+
+await trykk('#tabbar button[data-tab="turen"]');
+await sjekk("Turen har rad for pakkeliste", async () => await side.$('[data-side="pakk"]') !== null);
+await sjekk("Turen har rad for sitteplasser", async () => await side.$('[data-side="seter"]') !== null);
+await sjekk("Turen har rad for nødnummer", async () => await side.$('[data-side="kontakt"]') !== null);
 await sjekk("reiselederen har opprop", async () => await side.$('[data-side="opprop"]') !== null);
+await sjekk("Turen har turkoden", async () =>
+  /Turkode/.test(await side.$eval("#screen", e => e.textContent)));
+await trykk('#tabbar button[data-tab="meg"]');
+await sjekk("Meg har ikke det praktiske lenger", async () => await side.$('[data-side="pakk"]') === null);
+await trykk('#tabbar button[data-tab="turen"]');
 
 /* ───── pakkeliste ───── */
 await trykk('[data-side="pakk"]');
@@ -284,7 +303,7 @@ if (addKnapp) {
 /* Dra et punkt opp i lista, med ekte pekerhendelser. */
 await side.evaluate(() => { const b = document.querySelector("[data-close]"); if (b) b.click(); });
 await side.waitForTimeout(300);
-await trykk('#tabbar button[data-tab="meg"]');
+await trykk('#tabbar button[data-tab="turen"]');
 await trykk('[data-side="pakk"]');
 const rekke = () => side.$$eval('.pkliste[data-egen="0"] .pknavn', e => e.map(x => x.textContent));
 const foerDra = await rekke();
@@ -315,7 +334,7 @@ for (const [flagg, venta] of [["", /står fortsatt uten posisjon/], ["&vaerfeil=
   s3.on("pageerror", e => feil.push("pageerror (vær): " + e));
   await s3.goto(`http://localhost:${process.env.PORT || 4321}/design/demo.html?utenpos=1${flagg}`, { waitUntil: "networkidle" });
   await s3.waitForSelector("#tabbar button");
-  await s3.evaluate(() => document.querySelector('#tabbar button[data-tab="meg"]').click());
+  await s3.evaluate(() => document.querySelector('#tabbar button[data-tab="turen"]').click());
   await s3.waitForTimeout(500);
   const merke = flagg ? "når serveren sier nei" : "når alt gikk bra";
   await sjekk(`knappen «Slå opp adressene på nytt» finnes ${merke}`,
@@ -347,8 +366,8 @@ for (const [flagg, venta] of [["", /står fortsatt uten posisjon/], ["&vaerfeil=
     (await s4.$$eval(".ogsaarad", e => e.length)) === 1);
   await sjekk("et punkt som overlapper, men ikke har startet, staar ikke under Samtidig", async () =>
     !/har ikke startet/.test(await s4.$eval(".naakort", e => e.textContent)));
-  await sjekk("det punktet ligger under Senere i dag i stedet", async () =>
-    (await s4.$$eval(".post", e => e.map(x => x.textContent))).some(t => /har ikke startet/.test(t)));
+  await sjekk("det punktet staar i dagens liste i stedet", async () =>
+    (await s4.$$eval(".tl .ev", e => e.map(x => x.textContent))).some(t => /har ikke startet/.test(t)));
   await sjekk("den samtidige raden har bade tid, tittel og sted", async () => {
     const t = await s4.$eval(".ogsaarad", e => e.textContent.replace(/\s+/g, " "));
     return /\d\d:\d\d/.test(t) && /Gruppe B/.test(t) && /Orsay/.test(t);
@@ -359,9 +378,9 @@ for (const [flagg, venta] of [["", /står fortsatt uten posisjon/], ["&vaerfeil=
     (await s4.$$eval(".naakort .hva .vaer", e => e.length)) === 1);
   await sjekk("den samtidige raden viser vaer", async () =>
     (await s4.$$eval(".ogsaarad .vaer", e => e.length)) === 1);
-  await sjekk("hvert punkt under Senere i dag viser vaer", async () => {
-    const rader = await s4.$$eval(".post", e => e.length);
-    const vaer = await s4.$$eval(".post .vaer", e => e.length);
+  await sjekk("hvert punkt i dagens liste viser vaer", async () => {
+    const rader = await s4.$$eval(".tl .ev", e => e.length);
+    const vaer = await s4.$$eval(".tl .ev .vaer", e => e.length);
     return rader > 0 && vaer === rader;
   });
   await sjekk("vaeret klippes ikke bort i den samtidige raden", async () =>
@@ -424,7 +443,7 @@ for (const [siden, venta, hva] of [
   await s7.goto(`http://localhost:${process.env.PORT || 4321}/design/demo.html`, { waitUntil: "networkidle" });
   await s7.waitForSelector("#tabbar button");
   // Listene ligger under Meg nå, ikke på I dag.
-  await s7.evaluate(() => document.querySelector('#tabbar [data-tab="meg"]').click());
+  await s7.evaluate(() => document.querySelector('#tabbar [data-tab="turen"]').click());
   await s7.waitForTimeout(400);
   await s7.evaluate(() => document.querySelector('[data-side="rom"]').click());
   await s7.waitForTimeout(700);
@@ -449,6 +468,69 @@ for (const [siden, venta, hva] of [
       .filter(t => /Emma/.test(t)).length === 1);
   await s7.close();
 }
+/* Omvisningen peker paa ekte ting, og det er det eneste som gjoer den
+   bedre enn fire sider tekst. For hvert steg: finner den maalet, ligger
+   ringen inne paa skjermen, og staar kortet klar av den? Et steg som
+   peker paa ingenting, eller et kort som dekker det det snakker om, er
+   verre enn ingen omvisning. */
+for (const rolle of ["leder", "deltaker"]) {
+  const s8 = await (await nb.newContext({ ...devices["iPhone 13"] })).newPage();
+  s8.on("pageerror", e => feil.push(`pageerror (omvisning ${rolle}): ` + e));
+  const url = `http://localhost:${process.env.PORT || 4321}/design/demo.html?omvisning=1`
+    + (rolle === "deltaker" ? "&rolle=deltaker" : "");
+  await s8.goto(url, { waitUntil: "networkidle" });
+  await s8.waitForSelector("#omvisKort h3", { timeout: 8000 });
+  await s8.waitForTimeout(600);
+
+  const antallSteg = await s8.$eval("#omvisKort .omvis-teller", e =>
+    Number(e.textContent.match(/av (\d+)/)[1]));
+  await sjekk(`omvisningen starter av seg selv, ${rolle}`, async () => antallSteg > 3);
+
+  const daarlige = [];
+  for (let i = 0; i < antallSteg; i++) {
+    await s8.waitForTimeout(450);
+    const m = await s8.evaluate(() => {
+      const k = document.getElementById("omvisKort");
+      const r = document.getElementById("omvisRing");
+      const rb = r.getBoundingClientRect(), kb = k.getBoundingClientRect();
+      const a = document.getElementById("appScreen").getBoundingClientRect();
+      return {
+        nr: k.querySelector(".omvis-teller").textContent,
+        tom: r.classList.contains("tom"),
+        ringInne: rb.height > 0 && rb.top >= a.top - 1 && rb.bottom <= a.bottom + 1,
+        kortInne: kb.top >= a.top - 1 && kb.bottom <= a.bottom + 1,
+        kolliderer: !r.classList.contains("tom") && rb.bottom > kb.top && rb.top < kb.bottom
+      };
+    });
+    if (m.tom) daarlige.push(`${m.nr}: fant ikke maalet`);
+    else if (!m.ringInne) daarlige.push(`${m.nr}: ringen er utenfor skjermen`);
+    if (!m.kortInne) daarlige.push(`${m.nr}: kortet er utenfor skjermen`);
+    if (m.kolliderer) daarlige.push(`${m.nr}: kortet dekker det ringen peker paa`);
+    await s8.evaluate(() => document.querySelector('[data-omvis="neste"]').click());
+  }
+  await sjekk(`hvert steg peker paa noe synlig, ${rolle}`, async () => {
+    if (!daarlige.length) return true;
+    nei.push(...daarlige.map(d => "   " + d));
+    return false;
+  });
+  await s8.waitForTimeout(400);
+  await sjekk(`omvisningen lukker seg etter siste steg, ${rolle}`,
+    async () => await s8.$eval("#omvis", e => e.hidden));
+
+  // Og den skal kunne startes om igjen, og hoppes over naar som helst.
+  await s8.evaluate(() => document.querySelector('#tabbar [data-tab="meg"]').click());
+  await s8.waitForTimeout(400);
+  await s8.evaluate(() => document.querySelector('[data-sheet="omvisning"]').click());
+  await s8.waitForTimeout(700);
+  await sjekk(`omvisningen kan startes om igjen, ${rolle}`,
+    async () => await s8.$eval("#omvis", e => !e.hidden));
+  await s8.evaluate(() => document.querySelector('[data-omvis="slutt"]').click());
+  await s8.waitForTimeout(400);
+  await sjekk(`hopp over lukker den, ${rolle}`,
+    async () => await s8.$eval("#omvis", e => e.hidden));
+  await s8.close();
+}
+
 console.log("OK:\n  " + ok.join("\n  "));
 console.log(nei.length ? "\nFEIL:\n  " + nei.join("\n  ") : "\nFEIL: ingen");
 console.log(feil.length ? "KONSOLL:\n  " + feil.join("\n  ") : "KONSOLL: rent");
