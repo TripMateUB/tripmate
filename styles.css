@@ -31,6 +31,8 @@
   --amber:#7A5409; --amber-soft:#FBF1DC;
   --moss:#1E6B4E; --moss-soft:#E2EFE9;
   --danger:#B3261E;
+  /* Værpillene: regn i blått (6,0:1), torden i fareroden (5,3:1). */
+  --regn:#1F5A8A; --regn-soft:#E3EEF7; --storm-soft:#FBE9E7;
   --r:14px;
   --safe-b:env(safe-area-inset-bottom,0px);
 
@@ -836,13 +838,24 @@ label.person span{flex:1;min-width:0}
   background-position:calc(100% - 17px) 16px,calc(100% - 11px) 16px;
 }
 
-/* ---------- vær ---------- */
+/* ---------- vær ----------
+   Yr sine egne symboler. Godt vær står grått og stille ved siden av
+   punktet; regn, torden, sludd og snø blir en pille med farge og ord. */
+.vaerikon{width:22px;height:22px;flex:none;display:block}
 .vaer{
-  float:right;margin-left:10px;font-size:13px;color:var(--ink-2);
+  float:right;margin-left:10px;font-size:13px;color:var(--ink-3);
   font-family:"DM Sans",sans-serif;font-weight:400;white-space:nowrap;
+  display:inline-flex;align-items:center;gap:3px;
 }
 .vaer b{font-family:"DM Sans",sans-serif;font-weight:600;font-size:12.5px}
+.vaer.daarlig{gap:4px;padding:1px 9px 1px 4px;border-radius:999px;font-size:12px;font-weight:600}
+.vaer.daarlig .vaerikon{width:20px;height:20px}
+.vaer.daarlig b{color:inherit}
+.vaer.regn{background:var(--regn-soft);color:var(--regn)}
+.vaer.storm{background:var(--storm-soft);color:var(--danger)}
+.vaer.snoe{background:var(--surface-2);color:var(--ink)}
 .nextup .vaer{color:inherit;opacity:.9}
+.utenvarsel{margin:-2px 0 9px;font-size:13px;color:var(--ink-2)}
 
 /* Dagens vær over programmet */
 .dagvaer{display:flex;gap:18px;margin:-2px 0 9px;flex-wrap:wrap}

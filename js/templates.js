@@ -60,8 +60,7 @@ const TEMPLATES = [
 
     channels: [
       { name:"Gruppe muren", sub:"Fotooppgave" },
-      { name:"Gruppe museum", sub:"Technikmuseum" },
-      { name:"Reiseledere", sub:"Kun ledere" }
+      { name:"Gruppe museum", sub:"Technikmuseum" }
     ]
   },
 
@@ -137,8 +136,7 @@ const TEMPLATES = [
 
     channels: [
       { name:"Gruppe Eiffeltårnet", sub:"Gruppedagen" },
-      { name:"Gruppe museum", sub:"Gruppedagen" },
-      { name:"Reiseledere", sub:"Kun ledere" }
+      { name:"Gruppe museum", sub:"Gruppedagen" }
     ]
   }
 ];

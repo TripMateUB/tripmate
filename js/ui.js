@@ -737,23 +737,44 @@ const UI = (() => {
   }
 
 
-  /* Yr svarer med koder som «partlycloudy_day». Vi viser et tegn og
-     temperaturen — ikke mer, for det skal stå ved siden av programmet
-     uten å ta oppmerksomheten fra det. */
-  function vaerTegn(kode) {
-    if (!kode) return "";
-    const k = String(kode);
-    const natt = k.endsWith("_night");
-    if (k.startsWith("clearsky")) return natt ? "🌙" : "☀️";
-    if (k.startsWith("fair")) return natt ? "🌙" : "🌤️";
-    if (k.startsWith("partlycloudy")) return "⛅";
-    if (k.startsWith("cloudy")) return "☁️";
-    if (k.includes("thunder")) return "⛈️";
-    if (k.includes("sleet")) return "🌨️";
-    if (k.includes("snow")) return "❄️";
-    if (k.includes("rain") || k.includes("shower")) return "🌧️";
-    if (k.startsWith("fog")) return "🌫️";
-    return "";
+  /* Yr svarer med koder som «partlycloudy_day», og symbolene til Yr har
+     nøyaktig de kodene som filnavn (MET Norway, MIT-lisens — se
+     icons/vaer/LICENSE). Koden brukes rett, men bare hvis den ser ut som
+     en kode: den kommer fra serveren og havner i en adresse. */
+  const vaerKode = k => (/^[a-z_]{3,60}$/.test(String(k || "")) ? String(k) : null);
+
+  /* Hva symbolet betyr, med ord. Står som alt-tekst, og i pillen når
+     været er dårlig. */
+  function vaerOrd(kode) {
+    const k = String(kode || "");
+    const lett = k.startsWith("light"), kraftig = k.startsWith("heavy");
+    if (k.includes("thunder")) return "Torden";
+    if (k.includes("sleet")) return lett ? "Litt sludd" : kraftig ? "Kraftig sludd" : "Sludd";
+    if (k.includes("snow")) return lett ? "Litt snø" : kraftig ? "Kraftig snø" : "Snø";
+    if (k.includes("showers")) return lett ? "Lette byger" : kraftig ? "Kraftige byger" : "Regnbyger";
+    if (k.includes("rain")) return lett ? "Litt regn" : kraftig ? "Kraftig regn" : "Regn";
+    if (k.startsWith("fog")) return "Tåke";
+    if (k.startsWith("clearsky")) return "Klart";
+    if (k.startsWith("fair")) return "Lettskyet";
+    if (k.startsWith("partlycloudy")) return "Delvis skyet";
+    if (k.startsWith("cloudy")) return "Skyet";
+    return "Vær";
+  }
+
+  /* Vær som krever noe av deg: regn, torden, sludd og snø. Det får farge
+     og ord. Alt annet står grått og stille ved siden av programmet. */
+  function vaerSlag(kode) {
+    const k = String(kode || "");
+    if (k.includes("thunder")) return "storm";
+    if (k.includes("snow") || k.includes("sleet")) return "snoe";
+    if (k.includes("rain") || k.includes("showers")) return "regn";
+    return null;
+  }
+
+  function vaerIkon(kode) {
+    const k = vaerKode(kode);
+    if (!k) return "";
+    return `<img class="vaerikon" src="icons/vaer/${k}.svg" alt="${esc(vaerOrd(k))}" width="22" height="22" loading="lazy">`;
   }
 
 
@@ -770,12 +791,17 @@ const UI = (() => {
      gruppen bor eller skal være. Det er «været der du skal den dagen». */
   function dagensVaer(d) {
     const sted = dagensSted(d);
-    if (!sted) return "";
-    const f = Api.vaerPunkt(sted, d.date, "09:00");
-    const e = Api.vaerPunkt(sted, d.date, "15:00");
-    if (!f && !e) return "";
+    const f = sted ? Api.vaerPunkt(sted, d.date, "09:00") : null;
+    const e = sted ? Api.vaerPunkt(sted, d.date, "15:00") : null;
+    if (!f && !e) {
+      // Yr har varsel omtrent ti dager fram. Lenger fram er radene uten
+      // vær, og det skal ikke se ut som om noe er galt.
+      const harPosisjon = Object.values(S.trip.places).some(p => p.lat != null && p.lon != null);
+      return harPosisjon && daysUntil(d.date) > 8
+        ? `<p class="utenvarsel">Været kommer omtrent ti dager før, når Yr har varsel for dagen.</p>` : "";
+    }
     const del = (v, nar) => v
-      ? `<span class="dagdel"><em>${nar}</em> ${vaerTegn(v.sym)}${v.temp == null ? "" : ` <b>${Math.round(v.temp)}°</b>`}</span>`
+      ? `<span class="dagdel"><em>${nar}</em> ${vaerIkon(v.sym)}${v.temp == null ? "" : ` <b>${Math.round(v.temp)}°</b>`}</span>`
       : "";
     return `<div class="dagvaer">${del(f, "formiddag")}${del(e, "ettermiddag")}</div>`;
   }
@@ -785,10 +811,17 @@ const UI = (() => {
     let v = placeId ? Api.vaerPunkt(placeId, dato, tid) : null;
     if (!v && reserve && reserve !== placeId) v = Api.vaerPunkt(reserve, dato, tid);
     if (!v) return "";
-    const tegn = vaerTegn(v.sym);
+    const ikon = vaerIkon(v.sym);
     const grader = v.temp == null ? "" : `${Math.round(v.temp)}°`;
-    if (!tegn && !grader) return "";
-    return `<span class="vaer" title="Værmelding fra Yr">${tegn}${grader ? ` <b>${grader}</b>` : ""}</span>`;
+    if (!ikon && !grader) return "";
+    // Godt vær står grått og stille. Dårlig vær blir en pille med ord, så
+    // det ikke drukner blant solsymbolene (variant B fra gjennomgangen).
+    const slag = vaerSlag(v.sym);
+    if (slag) {
+      return `<span class="vaer daarlig ${slag}" title="Værmelding fra Yr">${ikon}<span>${esc(vaerOrd(v.sym))}</span>${
+        grader ? ` <b>${grader}</b>` : ""}</span>`;
+    }
+    return `<span class="vaer" title="Værmelding fra Yr">${ikon}${grader ? `<b>${grader}</b>` : ""}</span>`;
   }
   function viewProgram() {
     const trip = S.trip;
@@ -1418,7 +1451,9 @@ const UI = (() => {
     matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 
   function installkort() {
-    if (paaHjemskjerm()) return "";
+    // I iOS-appen er TripMate alt en app. Et kort om Safari og hjemskjermen
+    // ville vært feil der, og kan gi avslag hos Apple.
+    if (paaHjemskjerm() || erNativ()) return "";
     try { if (localStorage.getItem("tk.skjulInstall")) return ""; } catch { /* uviktig */ }
 
     const iOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
@@ -1542,7 +1577,8 @@ const UI = (() => {
     const tall = S.megTall;              // null til de er hentet
     const trip = S.trip;
     const varslerAv = varslerErAv();
-    const varselTekst = varslerAv
+    const varselTekst = erNativ() ? "Kommer i en oppdatering"
+      : varslerAv
       ? (S.varselStatus === "avslaatt" ? "Blokkert i nettleseren" : "Ikke slått på her")
       : S.varselStatus === "umulig" ? "Ikke mulig i denne nettleseren"
       : ({ alt: "Alt", viktig: "Det viktige", ingen: "Ingenting" })[Api.varselNiva(null)] || "På";
@@ -1666,7 +1702,8 @@ const UI = (() => {
       $("convSub").textContent = S.trip.name;
     } else if (conv) {
       $("convName").textContent = conv.name;
-      $("convSub").textContent = conv.private ? "Privat · bare de som er lagt til"
+      $("convSub").textContent = conv.ledere ? "Bare reiseledere · følger lederrollen"
+        : conv.private ? "Privat · bare de som er lagt til"
         : conv.bareLedere ? "Oppslagstavle · reiselederne skriver"
         : "Åpen for alle på turen";
       $("convWho").dataset.members = conv.id;
@@ -4632,7 +4669,9 @@ const UI = (() => {
           ${ch.private ? "&#128274;" : ICON.chat}</span>
         <span class="grow">
           <b>${esc(ch.name)}</b>
-          <small>${ch.private
+          <small>${ch.ledere
+            ? "Lederchat — alle reiseledere er med, og ingen andre. Den som får lederrollen, legges til av seg selv."
+            : ch.private
             ? "Privat chat — bare de som står under, ser den"
             : ch.bareLedere
             ? "Oppslagstavle — alle på turen leser, reiseledere skriver"
@@ -4670,11 +4709,11 @@ const UI = (() => {
           ? `<p class="muted">Klarte ikke hente deltakerlista.</p>`
           : `<div class="memberlist">${folk.med.map(p => `<div class="person">
               <span>${esc(p.name)}${p.me ? " <em>deg</em>" : ""}${p.role === "leader" ? ' <em>reiseleder</em>' : ""}</span>
-              ${ch.private && !p.me ? `<button class="linkbtn" data-cmdel="${esc(p.id)}">fjern</button>` : ""}
+              ${ch.private && !ch.ledere && !p.me ? `<button class="linkbtn" data-cmdel="${esc(p.id)}">fjern</button>` : ""}
             </div>`).join("")}</div>`}
       </div>
 
-      ${folk && folk.andre.length ? `<div>
+      ${folk && folk.andre.length && !ch.ledere ? `<div>
         <div class="eyebrow" style="margin-bottom:8px">Andre på turen</div>
         <div class="memberlist">${folk.andre.map(p => `<div class="person">
           <span>${esc(p.name)}${p.role === "leader" ? ' <em>reiseleder</em>' : ""}</span>
@@ -4683,8 +4722,8 @@ const UI = (() => {
       </div>` : ""}
 
       <div class="stack">
-        ${ch.private ? `<button class="btn danger" data-cmleave="${esc(ch.id)}">Gå ut av chatten</button>` : ""}
-        ${ch.min || (!ch.private && S.trip.role === "leader")
+        ${ch.private && !ch.ledere ? `<button class="btn danger" data-cmleave="${esc(ch.id)}">Gå ut av chatten</button>` : ""}
+        ${ch.ledere ? "" : ch.min || (!ch.private && S.trip.role === "leader")
           ? `<button class="btn danger" data-slettchat="${esc(ch.id)}">Slett chatten</button>` : ""}
       </div>`;
   }
@@ -4695,8 +4734,19 @@ const UI = (() => {
     const paaHjem = matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
     const turNiva = Api.varselNiva(null);
     const valg = Api.varselvalg();
+    // I iOS-appen virker ikke nettleservarsler, og telefonens egne varsler
+    // (APNs) er ikke bygget ennå. Da skal siden si det rett ut, ikke be om
+    // hjemskjerm og Safari-innstillinger som ikke finnes i en app.
+    const nativ = erNativ();
 
-    const topp = st === null
+    const topp = nativ
+      ? `<div class="card pad" style="padding-block:14px">
+           <b style="font-family:"DM Sans",sans-serif;font-size:14px">Varsler kommer i en oppdatering</b>
+           <p style="margin:7px 0 0;font-size:13.5px;color:var(--ink-2)">
+             Appen kan ikke sende varsler ennå. Valgene under er lagret på kontoen din,
+             og gjelder så snart varslene er på plass.</p>
+         </div>`
+      : st === null
       ? venter("Sjekker")
       : iOS && !paaHjem
       ? `<div class="card pad" style="padding-block:14px;border-left:3px solid var(--amber)">
@@ -4796,14 +4846,14 @@ const UI = (() => {
           følger turen, endrer seg med valget over.</p>
       </div>
 
-      ${!altVirker ? "" : `<div style="margin-top:18px">
+      ${nativ || !altVirker ? "" : `<div style="margin-top:18px">
         <button class="linkbtn" id="testServer" style="font-size:13px">Send et testvarsel hit</button>
         ${S.varselTest ? `<div class="card pad" style="padding-block:12px;margin-top:8px;
              border-left:3px solid var(--${S.varselTest.ok ? "moss" : "amber"})">
            <p style="margin:0;font-size:13.5px;color:var(--ink-2)">${esc(S.varselTest.tekst)}</p></div>` : ""}
       </div>`}
 
-      ${altVirker ? "" : `<div>
+      ${nativ || altVirker ? "" : `<div>
         <div class="eyebrow" style="margin:20px 0 8px">Virker det?</div>
         <div class="card pad" style="padding-block:6px">
           ${linje("Nettleseren kan varsle", st !== "umulig", st === "umulig" ? "Ikke støttet her" : "Ja")}
@@ -5047,6 +5097,7 @@ const UI = (() => {
           <dt>Lagring</dt><dd>Program og meldinger ligger i en database. Du ser bare turer du er medlem av.</dd>
           <dt>Pålogging</dt><dd>Enheten din får en anonym identitet. Navnet er selvvalgt.</dd>
           <dt>Kart</dt><dd>Adressen åpnes i Google Maps eller Apple Maps.</dd>
+          <dt>Vær</dt><dd>Værmelding og værsymboler fra Yr og MET Norway. Symbolene er © 2015–2017 Yr, MIT-lisens.</dd>
         </dl>
       </div>
       <p class="muted" style="margin-top:12px">Turkoden er en nøkkel til et rom. Alle som har den kan bli

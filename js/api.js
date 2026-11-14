@@ -175,6 +175,7 @@ const Api = (() => {
     if (m.includes("fullt")) return k("Det er fullt — alle plassene er tatt.");
     if (m.includes("bare_ledere")) return k("Bare reiseledere kan skrive i denne chatten.");
     if (m.includes("privat_chat")) return k("En privat chat kan ikke være oppslagstavle.");
+    if (m.includes("lederchat_styres")) return k("Lederchatten følger lederrollen. Gi lederrollen i stedet.");
     if (m.includes("ikke_fritt")) return k("Reiselederen fordeler plassene her.");
     if (m.includes("alt_din_plass")) return k("Det er plassen din.");
     if (m.includes("alt_spurt")) return k("Du har alt en forespørsel som venter her.");
@@ -309,6 +310,9 @@ const Api = (() => {
       channels: channels.map(c => ({
         id: c.id, name: c.name, sub: c.sub, private: c.private === true,
         bareLedere: c.bare_ledere === true,   // oppslagstavle, ikke samtale
+        // Lederchatten: medlemmene følger lederrollen (Utvidelse 28), så
+        // ingen kan legge til, fjerne, gå ut av eller slette den.
+        ledere: c.ledere === true,
         min: c.created_by === userId          // du laget den, og kan slette den
       }))
     };
@@ -2119,7 +2123,7 @@ const Api = (() => {
     if (m.includes("disabled") || m.includes("not allowed") || m.includes("not enabled")) {
       return new Error("E-postinnlogging er slått av i Supabase.");
     }
-    if (m.includes("expired")) return k("Koden er utløpt. Be om en ny.");
+    if (m.includes("expired")) return new Error("Koden er utløpt. Be om en ny.");
     if (m.includes("token") || m.includes("otp")) {
       return new Error("Koden stemte ikke. Sjekk at du skrev alle sifrene.");
     }
