@@ -3,7 +3,7 @@
   "configurations": [
     {
       "name": "design",
-      "runtimeExecutable": "C:\\Program Files\\nodejs\\node.exe",
+      "runtimeExecutable": "node",
       "runtimeArgs": ["design/server.mjs"],
       "port": 4321
     }
