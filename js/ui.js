@@ -20,6 +20,26 @@ const UI = (() => {
     sideChat: null, chatFolk: null, ventende: 0, vedlegg: null, sender: false, sisteComposer: null };
 
   const $ = id => document.getElementById(id);
+  /* Navneregler (L2). Bokstaver fra alle språk, mellomrom, bindestrek og
+     apostrof: «Anne-Marie», «O'Brien» og «Nguyễn» går, «Ole123» og «@ola»
+     gjør det ikke. Tullenavn stoppes ikke av regler — det gjør «Krev
+     godkjenning» og at reiselederen kan rette navnet. Basen sjekker det
+     samme (navn_ok, Utvidelse 30). */
+  const navnDel = /^\p{L}[\p{L}\p{M}' ’.-]*$/u;
+  function navnFeil(first, last) {
+    const f = String(first || "").trim(), l = String(last || "").trim();
+    if (!f || !l) return "Skriv både fornavn og etternavn.";
+    const ord = (f + " " + l).split(/\s+/);
+    if (!ord.every(o => navnDel.test(o))) return "Navnet kan ha bokstaver, mellomrom, bindestrek og apostrof — ikke tall eller andre tegn.";
+    if ((f + " " + l).length > 60) return "Navnet er for langt.";
+    return null;
+  }
+  // Stor bokstav først i hvert navn og etter bindestrek: «anne-marie» blir
+  // «Anne-Marie». Resten står slik det ble skrevet, så «McDonald» og
+  // «O'Brien» ikke blir ødelagt.
+  const storForbokstav = s => String(s || "").trim().replace(/\s+/g, " ")
+    .replace(/(^|[\s-])(\p{L})/gu, (_, foran, b) => foran + b.toLocaleUpperCase("nb"));
+
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
   /* Datoen der telefonen er. toISOString() gir datoen i UTC, og da trodde
      appen at det var i går mellom midnatt og kl 01–02 i Norge, og at det
@@ -240,7 +260,28 @@ const UI = (() => {
   }
 
   /* ───────────────── oppstart ───────────────── */
+  /* Lenken fra «Del turkoden» har ?kode=XXXXXX (L3). Koden tas ut av
+     adressen, så den ikke blir stående, og fylles inn der du blir med. */
+  const innKode = (() => {
+    try {
+      const p = new URLSearchParams(location.search);
+      const k = (p.get("kode") || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
+      if (p.has("kode")) {
+        p.delete("kode");
+        history.replaceState(null, "", location.pathname + (p.toString() ? "?" + p : ""));
+      }
+      return k || null;
+    } catch { return null; }
+  })();
+
   async function boot() {
+    iosTekststorrelse();
+    if (innKode) setTimeout(() => {
+      // Står du på skjemaet, fylles koden inn der. Er du alt inne i en
+      // tur, åpnes «Bli med på en ny tur» med koden.
+      if (!$("joinScreen").hidden) $("fCode").value = innKode;
+      else if (!$("appScreen").hidden && S.trip && !S.trip.code.includes(innKode)) sheetJoinTrip(innKode);
+    }, 1500);
     if (!CONFIG.ready) return bootSetup();
 
     $("bootMsg").innerHTML = venter("Kobler til");
@@ -325,6 +366,7 @@ const UI = (() => {
 
     const p = Api.getProfile();
     if (p) { $("fFirst").value = p.first; $("fLast").value = p.last; }
+    if (innKode && !$("fCode").value) $("fCode").value = innKode;
 
     // Er du innlogget, men uten turer, ser skjermen ut som forste gang.
     // Si fra at du faktisk er logget inn, saa du ikke tror det feilet.
@@ -454,7 +496,11 @@ const UI = (() => {
       if (trip.role === "leader") {
         Api.antallVentende(tripId).then(n => { if (n !== S.ventende) { S.ventende = n; render(); } });
         Api.ryddGamleBilder();
-      } else S.ventende = 0;
+      } else {
+        S.ventende = 0;
+        // Står navnet ditt på romlista, spør appen om det er deg.
+        setTimeout(() => spoerOmRomplass(tripId).catch(() => {}), 1200);
+      }
       // Statusen trengs på Meg-fanen, ikke bare inne på varselsiden.
       Api.varselStatus().then(s => { if (s !== S.varselStatus) { S.varselStatus = s; render(); } });
       S.svarTil = null;
@@ -506,6 +552,8 @@ const UI = (() => {
      ikke om lørdag, og et kort om torsdag over lørdagens program ville
      sagt noe det ikke mente. */
 
+  const fmtKortDato = dato => new Date(dato + "T12:00:00").toLocaleDateString("nb-NO", { day: "numeric", month: "long" });
+
   /* Hilsenen navngir dagen og dagens ene faktum: hvilken by den er i. */
   function dagTopp(d) {
     const trip = S.trip;
@@ -517,7 +565,7 @@ const UI = (() => {
     const by = sted ? byen(trip.places[sted]) : null;
     return `<div>
       <h1 class="daghilsen">${esc(by ? `${dagnavn} i ${by}` : dagnavn)}</h1>
-      <p class="dagunder">${d ? `Dag ${nr} av ${trip.days.length}` : esc(trip.name)}</p>
+      <p class="dagunder">${d ? `Dag ${nr} av ${trip.days.length} · ${esc(fmtKortDato(d.date))}` : esc(trip.name)}</p>
     </div>`;
   }
 
@@ -536,7 +584,8 @@ const UI = (() => {
       // den skjermen folk faktisk ser om morgenen.
       const ogsaa = samtidigeMed(ne.day, ne.item, naa, Boolean(ne.naa));
       kort = `<section class="naakort">
-        <div class="merk"><i></i>${ne.naa ? "Nå" + esc(sidenTekst(ne.item, naa)) : ne.day.date === today() ? "Nå snart" : "Neste · " + esc(ne.day.label)}</div>
+        <div class="merk"><i></i>${ne.naa ? "Nå" + esc(sidenTekst(ne.item, naa))
+          : ne.day.date === today() ? esc(tilNeste(ne.item, naa)) : "Neste · " + esc(ne.day.label)}</div>
         <div class="kl">${ne.item.t ? esc(tidTekst(ne.item)) : "—"}</div>
         <div class="hva">${esc(ne.item.title)}${vaerMerke(ne.item.place, ne.day.date, ne.item.t, dagensSted(ne.day))}</div>
         ${p ? `<div class="hvor">${esc(p.name)}${p.addr ? " · " + esc(p.addr) : ""}</div>` : ""}
@@ -592,7 +641,7 @@ const UI = (() => {
       rader.push({
         side: "seter",
         hva: manglerSete === 1 && tall.kjoretoy === 1
-          ? "Du har ikke valgt plass" : `Du mangler plass i ${manglerSete}`,
+          ? "Du har ikke valgt sitteplass" : `Du mangler sitteplass i ${manglerSete} kjøretøy`,
         hvorfor: "Sitteplasser"
       });
     }
@@ -604,7 +653,9 @@ const UI = (() => {
     }
 
     const igjen = (tall.pakkTotalt || 0) - (tall.pakkKrysset || 0);
-    if (igjen > 0) {
+    // Når turen har startet, er det for sent å pakke. Da maser ikke lista.
+    const startet = S.trip.days.length && S.trip.days[0].date <= today();
+    if (igjen > 0 && !startet) {
       rader.push({
         side: "pakk",
         hva: `${igjen} ${igjen === 1 ? "ting" : "ting"} står ukrysset`,
@@ -615,10 +666,9 @@ const UI = (() => {
     if (!rader.length) return "";
     return `<div>
       <div class="eyebrow" style="margin-bottom:8px;color:var(--amber)">Venter på deg · ${rader.length}</div>
-      <div class="card pad" style="border-left:3px solid var(--amber)">
+      <div class="card pad venterkompakt" style="border-left:3px solid var(--amber)">
         <div class="list">${rader.map(r => `<button class="listrow" data-side="${r.side}">
-          <div class="grow"><div class="nm">${esc(r.hva)}</div>
-            <div class="sub">${esc(r.hvorfor)}</div></div>
+          <div class="grow"><div class="nm">${esc(r.hva)}</div></div>
           <span class="chev">${ICON.chev}</span></button>`).join("")}</div>
       </div></div>`;
   }
@@ -633,7 +683,11 @@ const UI = (() => {
     if (!tall) return "";
     if (!tall.kjoretoy) return "Ikke satt opp";
     const mangler = tall.kjoretoy - tall.mineSeter;
-    return mangler > 0 ? `Mangler ${mangler}` : "Alt valgt";
+    const liste = tall.mineSeterListe || [];
+    // Ett kjøretøy og en plass: si plassen. Flere: si hvor mange som mangler.
+    if (tall.kjoretoy === 1 && liste.length === 1) return plassnavn(liste[0].k, liste[0].nr);
+    if (mangler > 0) return `Mangler ${mangler} av ${tall.kjoretoy}`;
+    return liste.length === 1 ? plassnavn(liste[0].k, liste[0].nr) : "Alt valgt";
   }
 
   function praktisk() {
@@ -668,6 +722,24 @@ const UI = (() => {
             <div class="sub">Hvem ringer du, og på hvilket nummer</div></div>
           <span class="chev">${ICON.chev}</span></button>
 
+        <button class="listrow" data-side="dokumenter">
+          <span class="rikon">${ICON.post}</span>
+          <div class="grow"><div class="nm">Dokumenter</div>
+            <div class="sub">Heftet, billetter og forsikring</div></div>
+          <span class="chev">${ICON.chev}</span></button>
+
+        <button class="listrow" data-kalender="1">
+          <span class="rikon mose">${ICON.cal}</span>
+          <div class="grow"><div class="nm">Legg programmet i kalenderen</div>
+            <div class="sub">Med adresse, så telefonen kan si fra når du må dra</div></div>
+          <span class="chev">${ICON.chev}</span></button>
+
+        ${S.trip.paaroerende ? `<button class="listrow" data-sheet="paaroerende">
+          <span class="rikon gul">${ICON.telefon}</span>
+          <div class="grow"><div class="nm">Nærmeste pårørende</div>
+            <div class="sub">Hvem reiselederne ringer hvis noe skjer deg</div></div>
+          <span class="chev">${ICON.chev}</span></button>` : ""}
+
         ${leder ? `<button class="listrow" data-side="opprop">
           <span class="rikon">${ICON.opprop}</span>
           <div class="grow"><div class="nm">Opprop</div>
@@ -682,8 +754,8 @@ const UI = (() => {
   function romtekst(tall) {
     if (!tall) return "";
     if (!tall.rom) return "Ikke satt opp";
-    if (S.trip.role === "leader") return `${tall.rom} rom`;
-    return tall.harRom ? "Du har rom" : "Ikke tildelt";
+    if (S.trip.role === "leader") return tall.romNavn ? `${tall.romNavn} · ${tall.rom} rom` : `${tall.rom} rom`;
+    return tall.harRom ? (tall.romNavn || "Du har rom") : "Ikke tildelt";
   }
 
   /* ───────── varighet ─────────
@@ -710,6 +782,16 @@ const UI = (() => {
   const UTEN_SLUTT_MIN = 5;
   const sluttMinutt = i => minutt(i.t) + (i.minutter || UTEN_SLUTT_MIN);
   const paagaarNaa = (i, naa) => Boolean(i.t) && i.t <= naa && sluttMinutt(i) > minutt(naa);
+
+  /* Hvor lenge til neste punkt i dag. «Nå snart» sto der også når det var
+     timer igjen (E12). Under en time: minuttene. Ellers: klokkeslettet. */
+  function tilNeste(i, naa) {
+    if (!i.t) return "Neste";
+    const d = minutt(i.t) - minutt(naa);
+    if (d <= 1) return "Nå";
+    if (d < 60) return `Om ${d} min`;
+    return `Neste kl ${i.t}`;
+  }
 
   /* «startet for 3 minutter siden», så det går an å se om man er sent ute. */
   function sidenTekst(i, naa) {
@@ -911,7 +993,11 @@ const UI = (() => {
       const p = i.place ? trip.places[i.place] : null;
       const isNext = ne && ne.day.date === d.date && ne.item.id === i.id && d.date === today();
       const sl = slutt(i);
-      return `<div class="ev ${isNext ? "now" : ""}" data-item="${esc(i.id)}" role="button" tabindex="0">
+      // Det som er over i dag, dempes (E13). Det som gjenstår, er det man
+      // leter etter.
+      const naaKl = new Date().toTimeString().slice(0, 5);
+      const over = d.date === today() && i.t && !isNext && sluttMinutt(i) <= minutt(naaKl);
+      return `<div class="ev ${isNext ? "now" : ""}${over ? " over" : ""}" data-item="${esc(i.id)}" role="button" tabindex="0">
         <div class="time">${i.t ? esc(i.t) : '<span style="color:var(--ink-3)">—</span>'}${
           sl ? `<small>${esc(sl)}</small>` : ""}${isNext ? "<em>neste</em>" : ""}</div>
         <div>
@@ -938,7 +1024,7 @@ const UI = (() => {
       <div class="chips">${chips}</div>
       <div>
         <div class="eyebrow" style="margin-bottom:7px;display:flex;justify-content:space-between;gap:8px;align-items:center">
-          <span>${esc(d.label)}${hotel ? " · bor på " + esc(hotel.name) : ""}</span>
+          <span>${hotel ? "Bor på " + esc(hotel.name) : ""}</span>
           ${leader ? `<button class="linkbtn" style="font-size:11px" data-edit>${S.edit ? "Ferdig" : "Rediger"}</button>` : ""}
         </div>
         ${dagensVaer(d)}
@@ -947,7 +1033,6 @@ const UI = (() => {
       </div>
       ${leader ? `<div class="stack">
         <button class="btn primary" data-sheet="additem" data-day="${esc(d.id)}">Legg til programpunkt</button>
-        <button class="btn" data-sheet="importpdf">Les inn program fra PDF</button>
         <button class="btn" data-sheet="hotel" data-day="${esc(d.id)}">${hotel ? "Bytt hotell denne dagen" : "Sett hotell denne dagen"}</button>
         ${S.edit ? `<button class="btn danger" data-delday="${esc(d.id)}">Slett hele dagen</button>` : ""}
       </div>` : ""}`;
@@ -1159,9 +1244,13 @@ const UI = (() => {
       </button>`;
     }).join("");
 
-    return `<div class="chatlist">${rows}</div>
+    return `<input type="search" id="sokFelt" class="sokfelt" placeholder="Søk i chattene" autocomplete="off" aria-label="Søk i chattene">
+      <div id="sokTreff"></div>
+      <div id="chatlistBoks">
+      <div class="chatlist">${rows}</div>
       <button class="btn" data-sheet="newchannel" style="width:100%">Ny chat</button>
-      <p class="muted">En chat er enten åpen for hele turen, eller privat for dem du legger til.</p>`;
+      <p class="muted">En chat er enten åpen for hele turen, eller privat for dem du legger til.</p>
+      </div>`;
   }
 
   const EMOJIER = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
@@ -1470,7 +1559,7 @@ const UI = (() => {
       S.tab = "turen"; render();
       toast(skjul ? "Skjult. Du finner den under «Skjulte»." : "Tatt fram igjen.");
     } catch {
-      toast("Klarte ikke lagre. Har du kjørt siste SQL?");
+      toast("Klarte ikke lagre. Prøv igjen om litt.");
     }
   }
 
@@ -1589,10 +1678,43 @@ const UI = (() => {
 
      Må ordnes står øverst. Det er reiselederens liste over hva som
      mangler i turen, og den hører hjemme her og ikke blant kontoen. */
+  /* Turen slettes av seg selv 60 dager etter siste programdag (L10). En
+     uke før står det øverst for reiselederen, med to valg. */
+  const sletteTekst = dato => cap(new Date(dato + "T12:00:00").toLocaleDateString("nb-NO", { day: "numeric", month: "long", year: "numeric" }));
+  function slettekort() {
+    const t = S.trip;
+    if (!t || t.role !== "leader" || !t.slettes) return "";
+    const n = daysUntil(t.slettes);
+    if (n > 7) return "";
+    return `<div class="card pad" style="padding-block:14px;border-left:3px solid var(--danger)">
+      <b style="font-family:"DM Sans",sans-serif;font-size:14.5px">${n <= 0 ? "Turen slettes i natt" : `Turen slettes om ${n} ${n === 1 ? "dag" : "dager"}`}</b>
+      <p style="margin:6px 0 12px;font-size:13.5px;color:var(--ink-2)">${esc(sletteTekst(t.slettes))}. Program, chatter, bilder og
+        deltakerlister forsvinner for alle. Trenger dere noe fra turen, kan du utsette.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" data-utsett="1">Utsett 30 dager</button>
+        <button class="btn danger" data-deltrip="${esc(t.id)}">Slett nå</button>
+      </div></div>`;
+  }
+
+  function sheetSletting() {
+    const t = S.trip;
+    openSheet(`<h3>Sletting etter turen</h3>
+      <p class="lede">Turen slettes automatisk <b>${esc(sletteTekst(t.slettes))}</b>. Det er 60 dager etter siste
+        programdag, eller datoen du har utsatt til. Bildene slettes alt 30 dager etter siste dag.</p>
+      <p class="muted">Slik ligger det ikke igjen opplysninger om deltakerne lenger enn turen trenger.
+        En uke før sletting står det øverst under Turen.</p>
+      <div class="stack" style="margin-top:12px">
+        <button class="btn" data-utsett="1">Utsett 30 dager</button>
+        <button class="btn danger" data-deltrip="${esc(t.id)}">Slett turen nå</button>
+      </div>
+      <button class="btn close" data-close>Lukk</button>`);
+  }
+
   function viewTuren() {
     const trip = S.trip;
     const leder = trip.role === "leader";
     return `
+      ${slettekort()}
       ${maaOrdnes()}
       ${praktisk()}
 
@@ -1606,6 +1728,12 @@ const UI = (() => {
               ? `${S.ventende} venter` : ""}</span>
             <span class="chev">${ICON.chev}</span></button>
 
+          ${leder ? `<button class="listrow" data-sheet="importpdf">
+            <span class="rikon">${ICON.last}</span>
+            <div class="grow"><div class="nm">Les inn program fra PDF</div>
+              <div class="sub">Programmet, bussplanen eller billettene</div></div>
+            <span class="chev">${ICON.chev}</span></button>` : ""}
+
           ${leder ? `<button class="listrow" data-sheet="endretur">
             <span class="rikon grunn">${ICON.blyant}</span>
             <div class="grow"><div class="nm">Navn og dato</div></div>
@@ -1617,6 +1745,19 @@ const UI = (() => {
             <div class="grow"><div class="nm">Turkode</div>
               <div class="sub">Trykk for å kopiere</div></div>
             <b class="mono" style="font-size:17px;letter-spacing:.09em">${esc(trip.code)}</b></button>
+
+          ${leder && trip.slettes ? `<button class="listrow" data-sheet="sletting">
+            <span class="rikon grunn">${ICON.cal}</span>
+            <div class="grow"><div class="nm">Slettes automatisk</div>
+              <div class="sub">60 dager etter siste programdag</div></div>
+            <span class="verdi">${esc(sletteTekst(trip.slettes))}</span>
+            <span class="chev">${ICON.chev}</span></button>` : ""}
+
+          ${leder ? `<button class="listrow" data-sheet="delkode">
+            <span class="rikon grunn">${ICON.nav}</span>
+            <div class="grow"><div class="nm">Del turkoden</div>
+              <div class="sub">QR-kode og lenke som fyller inn koden</div></div>
+            <span class="chev">${ICON.chev}</span></button>` : ""}
 
           ${leder ? `<button class="listrow" data-sheet="byttkode">
             <span class="rikon gul">${ICON.spark}</span>
@@ -1649,14 +1790,14 @@ const UI = (() => {
     return `
       ${installkort()}
 
-      <div class="megkort">
+      <button class="megkort" data-sheet="endrenavn" aria-label="Endre navnet ditt">
         <span class="megava">${esc(p ? p.initials : "–")}</span>
         <span class="grow">
           <b>${esc(p ? p.name : "Du")}</b>
-          <small>${trip.role === "leader" ? "Reiseleder" : "Deltaker"} på ${esc(trip.name)}</small>
+          <small>${trip.role === "leader" ? "Reiseleder" : "Deltaker"} på ${esc(trip.name)} · trykk for å endre navn</small>
         </span>
         ${Api.erAnonym() ? '<span class="tag amber">gjest</span>' : ""}
-      </div>
+      </button>
 
 
       <div>
@@ -1752,7 +1893,7 @@ const UI = (() => {
     if (side) {
       const sidenavn = { deltakere: "Deltakere og roller", varsler: "Varsler", chat: "Om chatten", rom: "Rom",
                          pakk: "Pakkeliste", seter: "Sitteplasser",
-                         kontakt: "Nødnummer", opprop: "Opprop" };
+                         kontakt: "Nødnummer", opprop: "Opprop", dokumenter: "Dokumenter" };
       $("convName").textContent = sidenavn[side] || "";
       $("convSub").textContent = S.trip.name;
     } else if (conv) {
@@ -1809,6 +1950,7 @@ const UI = (() => {
                           : side === "kontakt" ? viewKontakt()
                           : side === "opprop" ? viewOpprop()
                           : side === "deltakere" ? viewDeltakere()
+                          : side === "dokumenter" ? viewDokumenter()
                           : visningFor(S.tab);
     if (side === "varsler") settOppVarsler();
     if (byttetVisning && !conv) $("screen").scrollTop = 0;
@@ -1856,7 +1998,7 @@ const UI = (() => {
             ${ICON.bibliotek}
             <input type="file" accept="image/*" id="bildeInput">
           </label>` : ""}
-          <input id="msgInput" placeholder="${S.svarTil ? "Skriv svaret…" : "Melding til " + esc(conv.name) + "…"}" autocomplete="off" enterkeyhint="send" maxlength="2000">
+          <input id="msgInput" placeholder="${S.svarTil ? "Skriv svaret…" : "Melding…"}" autocomplete="off" enterkeyhint="send" maxlength="2000">
           <button class="send" type="submit" aria-label="Send melding" ${S.sender ? "disabled" : ""}>${ICON.send}</button>
         </form>`;
       $("composer").addEventListener("submit", onSend);
@@ -1948,7 +2090,7 @@ const UI = (() => {
     const tall = {
       // Merket sitter der jobben er: det turen mangler hoerer til Turen,
       // og varslene som ikke er paa, til Meg.
-      turen: oppgaver().length + (S.ventende ? 1 : 0),
+      turen: oppgaver().length + (S.ventende ? 1 : 0) + (slettekort() ? 1 : 0),
       meg: varslerErAv() ? 1 : 0,
       chat: Api.antallUleste(S.trip.id)
     };
@@ -2129,6 +2271,27 @@ const UI = (() => {
             window.Capacitor.isNativePlatform());
   const nativPlugin = navn =>
     (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins[navn]) || null;
+
+  /* Tekststørrelsen fra iPhone-innstillingene (E17). Appen er skrevet i
+     piksler, så den fulgte ikke «Større tekst». I app-versjonen måler vi
+     systemets brødtekst (17 px på vanlig størrelse) og skalerer teksten
+     like mye. Knipezoom står fortsatt av. På nett gjør vi ingenting —
+     der har nettleseren sin egen tekststørrelse. */
+  function iosTekststorrelse() {
+    if (!erNativ()) return;
+    try {
+      const proeve = document.createElement("span");
+      proeve.style.cssText = "font:-apple-system-body;position:absolute;visibility:hidden";
+      proeve.textContent = "A";
+      document.body.appendChild(proeve);
+      const px = parseFloat(getComputedStyle(proeve).fontSize) || 17;
+      proeve.remove();
+      const skala = Math.max(0.9, Math.min(1.6, px / 17));
+      const prosent = Math.round(skala * 100) + "%";
+      document.documentElement.style.webkitTextSizeAdjust = prosent;
+      document.body.style.webkitTextSizeAdjust = prosent;
+    } catch { /* vanlig størrelse */ }
+  }
 
   function settVedlegg(fil) {
     if (!fil || !S.openChat) return;
@@ -2382,6 +2545,54 @@ const UI = (() => {
   function closeSheet() {
     $("sheetBg").hidden = true;
     $("sheet").style.transform = "";
+    // Lukkes et bekreftelsesark uten svar (dratt ned, trykket utenfor),
+    // er svaret nei.
+    if (ventendeSvar) { const r = ventendeSvar; ventendeSvar = null; r(false); }
+  }
+
+  /* Bekreftelser i et ark i stedet for nettleserens vindu (E11). Vinduet
+     så ut som en nettside, og passet ikke med resten av appen. Knappen
+     sier hva som skjer, og er rød når noe forsvinner. */
+  let ventendeSvar = null;
+  function bekreft(tekst, valg = {}) {
+    return new Promise(svar => {
+      const fare = valg.fare != null ? valg.fare : /slett|fjern|forsvinner|kan ikke angres|logge ut|skru av/i.test(tekst);
+      const ja = valg.ja || (/^slette/i.test(tekst) ? "Slett" : /^fjerne/i.test(tekst) ? "Fjern"
+        : /^logge ut/i.test(tekst) ? "Logg ut" : /^gå ut/i.test(tekst) ? "Gå ut" : /^skru av/i.test(tekst) ? "Skru av" : "Ja");
+      if (ventendeSvar) { const r = ventendeSvar; ventendeSvar = null; r(false); }
+      openSheet(`<p style="margin:4px 0 18px;font-size:16px;line-height:1.45;color:var(--ink);white-space:pre-line">${esc(tekst)}</p>
+        <button class="btn ${fare ? "danger" : "primary"} big" id="bkJa">${esc(ja)}</button>
+        ${valg.bare ? "" : `<button class="btn close" id="bkNei">${esc(valg.nei || "Avbryt")}</button>`}`);
+      ventendeSvar = svar;
+      $("bkJa").addEventListener("click", () => { ventendeSvar = null; closeSheet(); svar(true); });
+      const nei = $("bkNei");
+      if (nei) nei.addEventListener("click", () => closeSheet());
+    });
+  }
+  const melding = tekst => bekreft(tekst, { bare: true, ja: "OK", fare: false });
+
+  /* Sletting med «Angre» i fem sekunder. Det som slettes, skjules med en
+     gang, og slettes først når tiden er ute. Angrer du, kommer det
+     tilbake, og ingenting er sendt til serveren. */
+  function medAngre(tekst, utfoer, skjul) {
+    if (skjul) skjul(true);
+    const t = $("toast");
+    clearTimeout(toast._t);
+    t.onclick = null;
+    t.classList.remove("klikkbar");
+    t.innerHTML = `<span>${esc(tekst)}</span> <button type="button" class="angreknapp">Angre</button>`;
+    t.hidden = false;
+    let angret = false;
+    t.querySelector(".angreknapp").onclick = ev => {
+      ev.stopPropagation(); angret = true; t.hidden = true;
+      if (skjul) skjul(false);
+    };
+    toast._t = setTimeout(async () => {
+      t.hidden = true;
+      if (angret) return;
+      try { await utfoer(); }
+      catch { if (skjul) skjul(false); toast("Klarte ikke slette."); }
+    }, 5000);
   }
 
   /* Dra arket nedover for å lukke det, slik man gjør i apper ellers.
@@ -2551,6 +2762,8 @@ const UI = (() => {
       <h3>${esc(it.title)}</h3>
       ${p ? `<div class="addr">${esc(p.name)}${p.addr ? " · " + esc(p.addr) : " · ingen adresse"}</div>` : ""}
       ${it.note ? `<div class="addr">${esc(it.note)}</div>` : ""}
+      ${(() => { const v = vaerMerke(it.place, dag.date, it.t, dagensSted(dag));
+        return v ? `<div class="arkvaer">Været: ${v}</div>` : ""; })()}
       ${it.paamelding ? paameldingsboks(it) : ""}
       ${p && p.addr ? `<div class="acts">
         ${kartKnapp(p, "primary")}
@@ -2698,12 +2911,12 @@ const UI = (() => {
       <button class="btn close" data-close>Lukk</button>`);
   }
 
-  function sheetJoinTrip() {
+  function sheetJoinTrip(kode) {
     openSheet(`<h3>Bli med på en ny tur</h3>
       <p class="muted" style="margin:6px 0 14px">Skriv turkoden du fikk av reiselederen.</p>
       <form id="joinTripForm">
         <div class="field"><label for="jCode">Turkode</label>
-          <input id="jCode" autocapitalize="characters" spellcheck="false" class="mono" style="text-transform:uppercase"></div>
+          <input id="jCode" autocapitalize="characters" spellcheck="false" class="mono" style="text-transform:uppercase" value="${esc(kode || "")}"></div>
         <p class="err" id="jErr" hidden></p>
         <button class="btn primary big" type="submit">Bli med</button>
       </form>
@@ -2724,27 +2937,40 @@ const UI = (() => {
     });
   }
 
+  /* Ny tur. Eksempelturene er borte (F2): de fylte en ekte tur med et
+     oppdiktet program. Spørsmålene under har ingen svar valgt på forhånd
+     (L2) — en reiseleder skal ta stilling til dem, ikke arve et valg hen
+     aldri så. Alt kan endres senere. */
   function sheetNewTrip() {
     const p = Api.getProfile();
-    const tplOptions = TEMPLATES.map(t =>
-      `<label class="pick"><input type="radio" name="tpl" value="${esc(t.key)}">
-        <span><b>${esc(t.name)}</b> — ${esc(t.lengthLabel)}<br><small>${esc(t.blurb)}</small></span></label>`).join("");
+    // Spørsmålet er en setning, ikke en overskrift. Korte svar (Ja/Nei)
+    // står side om side.
+    const sporsmaal = (navn, tittel, under, valg) => `<fieldset class="spm">
+      <legend>${tittel}</legend>
+      ${under ? `<small>${under}</small>` : ""}
+      <div class="picks${valg.every(x => !x[2]) ? " to" : ""}">${valg.map(([v, t, f]) => `<label class="pick"><input type="radio" name="${navn}" value="${v}">
+        <span><b>${t}</b>${f ? `<br><small>${f}</small>` : ""}</span></label>`).join("")}</div>
+    </fieldset>`;
 
     openSheet(`<h3>Lag en ny tur</h3>
       <p class="muted" style="margin:6px 0 14px">Du blir reiseleder og får en turkode å dele ut.</p>
-      <form id="newTripForm">
-        ${p ? "" : `<div class="field"><label for="tFirst">Ditt fornavn</label><input id="tFirst"></div>
-                    <div class="field"><label for="tLast">Ditt etternavn</label><input id="tLast"></div>`}
-        <div class="field"><label for="tName">Navn på turen</label><input id="tName" placeholder="Berlin 2027"></div>
-        <div class="field"><label for="tOrg">Klasse eller gruppe</label><input id="tOrg" placeholder="2STB Nordvang vgs"></div>
-        <div class="field">
-          <label>Start med</label>
-          <div class="picks">
-            <label class="pick"><input type="radio" name="tpl" value="" checked>
-              <span><b>Tomt program</b><br><small>Du legger inn dagene selv.</small></span></label>
-            ${tplOptions}
-          </div>
-        </div>
+      <form id="newTripForm" novalidate>
+        ${p ? "" : `<div class="field"><label for="tFirst">Ditt fornavn</label><input id="tFirst" autocomplete="given-name"></div>
+                    <div class="field"><label for="tLast">Ditt etternavn</label><input id="tLast" autocomplete="family-name"></div>`}
+        <div class="field"><label for="tName">Navn på turen</label><input id="tName" placeholder="Barcelona 2027"></div>
+        <div class="field"><label for="tOrg">Gruppe</label><input id="tOrg" placeholder="Sandnes IL G16, salgsavdelingen eller 10B"></div>
+        ${sporsmaal("tProgram", "Hvordan vil du lage programmet?", "", [
+          ["pdf", "Les inn fra PDF", "Har du programmet som PDF, leser appen det og viser et forslag."],
+          ["selv", "Jeg legger det inn selv", "Dag for dag, punkt for punkt."]])}
+        <div class="eyebrow" style="margin:6px 0 10px">Innstillinger · kan endres senere</div>
+        ${sporsmaal("tGodkjenn", "Skal du slippe inn hver deltaker selv?", "Ellers holder turkoden.", [
+          ["ja", "Ja, jeg godkjenner alle", "Du ser navnet før noen slipper inn."], ["nei", "Nei, turkoden holder"]])}
+        ${sporsmaal("tBilder", "Kan deltakerne sende bilder i chatten?", "Bildene slettes 30 dager etter siste programdag.", [
+          ["ja", "Ja"], ["nei", "Nei"]])}
+        ${sporsmaal("tFordel", "Hvem velger seter og rom?", "", [
+          ["selv", "Deltakerne velger selv", "Du kan fortsatt flytte folk."], ["leder", "Jeg fordeler"]])}
+        ${sporsmaal("tPaar", "Skal deltakerne oppgi nærmeste pårørende?", "Navn og telefon. Bare reiselederne ser det, og det slettes med turen.", [
+          ["ja", "Ja"], ["nei", "Nei"]])}
         <p class="err" id="tErr" hidden></p>
         <button class="btn primary big" type="submit" id="tSubmit">Opprett turen</button>
       </form>
@@ -2752,38 +2978,147 @@ const UI = (() => {
 
     $("newTripForm").addEventListener("submit", async e => {
       e.preventDefault();
-      const btn = $("tSubmit");
-      const err = $("tErr");
+      const btn = $("tSubmit"), err = $("tErr");
+      const vis = t => { err.textContent = t; err.hidden = false; err.scrollIntoView({ block: "center" }); };
+      const svar = navn => (document.querySelector(`input[name="${navn}"]:checked`) || {}).value;
       let prof = Api.getProfile();
       if (!prof) {
-        const f = $("tFirst").value.trim(), l = $("tLast").value.trim();
-        if (!f || !l) { err.textContent = "Skriv navnet ditt."; err.hidden = false; return; }
+        const f = storForbokstav($("tFirst").value), l = storForbokstav($("tLast").value);
+        const feil = navnFeil(f, l);
+        if (feil) return vis(feil);
         prof = Api.setProfile(f, l);
       }
       const name = $("tName").value.trim();
-      if (!name) { err.textContent = "Turen trenger et navn."; err.hidden = false; return; }
+      if (!name) return vis("Turen trenger et navn.");
+      const mangler = [["tProgram", "hvordan programmet skal lages"], ["tGodkjenn", "godkjenning av deltakere"],
+        ["tBilder", "bilder i chatten"], ["tFordel", "hvem som velger seter og rom"], ["tPaar", "nærmeste pårørende"]]
+        .filter(([n]) => !svar(n)).map(([, t]) => t);
+      if (mangler.length) return vis("Svar på: " + mangler.join(", ") + ".");
 
-      const key = (document.querySelector('input[name="tpl"]:checked') || {}).value;
-      const tpl = TEMPLATES.find(t => t.key === key) || null;
-
-      btn.disabled = true; btn.innerHTML = prikker() + (tpl ? " Lager turen og programmet" : " Lager turen");
+      btn.disabled = true; btn.innerHTML = prikker() + " Lager turen";
       try {
-        const plan = tpl ? templateDates(tpl) : null;
-
-        const trip = await Api.createTrip({
-          name, org: $("tOrg").value.trim(), dates: "", leaderName: prof.name
-        });
-        if (tpl) await Api.applyTemplate(trip.id, tpl, plan.dates);
+        const trip = await Api.createTrip({ name, org: $("tOrg").value.trim(), dates: "", leaderName: prof.name });
+        const fritt = svar("tFordel") === "selv";
+        // Innstillingene settes etter at turen finnes. Feiler én av dem,
+        // finnes turen likevel, og valget kan tas igjen under Deltakere.
+        await Promise.all([
+          Api.setKrevGodkjenning(trip.id, svar("tGodkjenn") === "ja"),
+          Api.setBilderPaa(trip.id, svar("tBilder") === "ja"),
+          Api.settRomvalg(trip.id, { fritt }),
+          Api.setSeterFritt(trip.id, fritt),
+          svar("tPaar") === "ja" ? Api.settPaaroerende(trip.id, true) : null
+        ].map(x => Promise.resolve(x).catch(() => null)));
 
         closeSheet();
         S.trips = await Api.myTrips().catch(() => S.trips);
         S.tab = "program";
         await openTrip(trip.id);
         toast("Turen er laget. Kode: " + trip.code);
+        if (svar("tProgram") === "pdf") sheetImportPdf();
       } catch (e2) {
         btn.disabled = false; btn.textContent = "Opprett turen";
+        vis(e2.message);
+      }
+    });
+  }
+
+  /* Nærmeste pårørende (L5). Frivillig å bruke for reiselederen, og det
+     deltakeren fyller inn, ser bare reiselederne. Samtykket er en
+     avkrysning som må være på før noe lagres. */
+  async function sheetPaaroerende() {
+    openSheet(`<h3>Nærmeste pårørende</h3>${venter("Henter")}<button class="btn close" data-close>Lukk</button>`);
+    let mitt = null;
+    try { mitt = await Api.minPaaroerende(S.trip.id); } catch { /* tomt skjema */ }
+    openSheet(`<h3>Nærmeste pårørende</h3>
+      <p class="lede">Hvem skal reiselederne ringe hvis noe skjer deg på turen?</p>
+      <div class="card pad" style="padding-block:12px;margin-bottom:14px">
+        <dl class="kv">
+          <dt>Hvem ser det</dt><dd>Bare reiselederne på ${esc(S.trip.name)}. Ikke de andre deltakerne.</dd>
+          <dt>Hvor lenge</dt><dd>Til du sletter det, går ut av turen, eller turen slettes.</dd>
+        </dl>
+      </div>
+      <form id="paForm" novalidate>
+        <div class="field"><label for="paNavn">Navn</label><input id="paNavn" maxlength="80" autocomplete="off" value="${esc(mitt ? mitt.navn : "")}" placeholder="Kari Nordmann"></div>
+        <div class="field"><label for="paTlf">Telefon</label><input id="paTlf" type="tel" inputmode="tel" maxlength="30" autocomplete="off" value="${esc(mitt ? mitt.telefon : "")}" placeholder="+47 900 00 000"></div>
+        <label class="pick" style="margin-bottom:12px"><input type="checkbox" id="paSamtykke" ${mitt ? "checked" : ""}>
+          <span><b>Det er greit at reiselederne ser dette</b><br>
+            <small>Er du under 13 år, må en foresatt si ja for deg.</small></span></label>
+        <p class="err" id="paErr" hidden></p>
+        <button class="btn primary big" type="submit" id="paLagre">Lagre</button>
+      </form>
+      ${mitt ? `<button class="btn danger" style="width:100%;margin-top:10px" id="paSlett">Slett opplysningene mine</button>` : ""}
+      <button class="btn close" data-close>Lukk</button>`);
+
+    $("paForm").addEventListener("submit", async e => {
+      e.preventDefault();
+      const navn = $("paNavn").value.trim(), telefon = $("paTlf").value.trim(), err = $("paErr");
+      const feil = !navn ? "Skriv navnet." : telnummer(telefon).length < 5 ? "Skriv et telefonnummer."
+        : !$("paSamtykke").checked ? "Kryss av for at det er greit at reiselederne ser dette." : null;
+      if (feil) { err.textContent = feil; err.hidden = false; return; }
+      try { await Api.lagrePaaroerende(S.trip.id, { navn, telefon }); closeSheet(); toast("Lagret. Bare reiselederne ser det."); }
+      catch (e2) { err.textContent = e2.message; err.hidden = false; }
+    });
+    const slett = $("paSlett");
+    if (slett) slett.addEventListener("click", async () => {
+      try { await Api.slettPaaroerende(S.trip.id); closeSheet(); toast("Opplysningene er slettet."); }
+      catch (e2) { toast(e2.message || "Klarte ikke slette."); }
+    });
+  }
+
+  /* Endre navnet ditt (L2). Gjelder alle turene du er med på. */
+  function sheetEndreNavn() {
+    const p = Api.getProfile() || {};
+    openSheet(`<h3>Endre navnet ditt</h3>
+      <p class="lede">Navnet vises for alle på turene dine. Det endres på alle turene samtidig.</p>
+      <form id="enForm" novalidate>
+        <div class="field"><label for="enFirst">Fornavn</label><input id="enFirst" value="${esc(p.first || "")}" autocomplete="given-name"></div>
+        <div class="field"><label for="enLast">Etternavn</label><input id="enLast" value="${esc(p.last || "")}" autocomplete="family-name"></div>
+        <p class="err" id="enErr" hidden></p>
+        <button class="btn primary big" type="submit" id="enLagre">Lagre</button>
+      </form>
+      <button class="btn close" data-close>Avbryt</button>`);
+    $("enForm").addEventListener("submit", async e => {
+      e.preventDefault();
+      const f = storForbokstav($("enFirst").value), l = storForbokstav($("enLast").value);
+      const feil = navnFeil(f, l), err = $("enErr");
+      if (feil) { err.textContent = feil; err.hidden = false; return; }
+      const b = $("enLagre"); b.disabled = true; b.innerHTML = prikker() + " Lagrer";
+      try {
+        const prof = await Api.endreNavn(f, l);
+        $("avatarText").textContent = prof.initials;
+        closeSheet();
+        await openTrip(S.trip.id);
+        toast("Navnet er endret.");
+      } catch (e2) {
+        b.disabled = false; b.textContent = "Lagre";
         err.textContent = e2.message; err.hidden = false;
       }
+    });
+  }
+
+  /* Reiselederen retter navnet til en deltaker på denne turen (L2). */
+  function sheetRettNavn(id, navn) {
+    const deler = String(navn || "").trim().split(/\s+/);
+    openSheet(`<h3>Rett navnet</h3>
+      <p class="lede">Gjelder bare denne turen.</p>
+      <form id="rnForm" novalidate>
+        <div class="field"><label for="rnFirst">Fornavn</label><input id="rnFirst" value="${esc(deler.slice(0, -1).join(" ") || deler[0] || "")}"></div>
+        <div class="field"><label for="rnLast">Etternavn</label><input id="rnLast" value="${esc(deler.length > 1 ? deler[deler.length - 1] : "")}"></div>
+        <p class="err" id="rnErr" hidden></p>
+        <button class="btn primary big" type="submit" id="rnLagre">Lagre</button>
+      </form>
+      <button class="btn close" data-close>Avbryt</button>`);
+    $("rnForm").addEventListener("submit", async e => {
+      e.preventDefault();
+      const f = storForbokstav($("rnFirst").value), l = storForbokstav($("rnLast").value);
+      const feil = navnFeil(f, l), err = $("rnErr");
+      if (feil) { err.textContent = feil; err.hidden = false; return; }
+      try {
+        await Api.rettNavn(S.trip.id, id, `${f} ${l}`);
+        closeSheet();
+        await aapneDeltakere(true);
+        toast("Navnet er rettet.");
+      } catch (e2) { err.textContent = e2.message; err.hidden = false; }
     });
   }
 
@@ -3036,8 +3371,9 @@ const UI = (() => {
         du må godkjenne før noe legges inn.</p>
       <form id="pdfForm">
         <div class="field">
-          <label for="pdfFiles">PDF-filer</label>
-          <input id="pdfFiles" type="file" accept="application/pdf" multiple>
+          <label class="btn filknapp" for="pdfFiles">Velg PDF-filer</label>
+          <input id="pdfFiles" type="file" accept="application/pdf" multiple class="skjultfil">
+          <p class="muted" id="pdfValgt" style="margin:8px 0 0">Ingen filer valgt.</p>
         </div>
         <p class="muted" style="margin:-4px 0 14px">Maks 5 filer, 8 MB hver og 20 MB til sammen.</p>
         <p class="err" id="pdfErr" hidden></p>
@@ -3045,6 +3381,10 @@ const UI = (() => {
       </form>
       <button class="btn close" data-close>Avbryt</button>`);
 
+    $("pdfFiles").addEventListener("change", e => {
+      const f = [...(e.target.files || [])];
+      $("pdfValgt").textContent = f.length ? f.map(x => x.name).join(", ") : "Ingen filer valgt.";
+    });
     $("pdfForm").addEventListener("submit", async e => {
       e.preventDefault();
       const input = $("pdfFiles"), err = $("pdfErr"), btn = $("pdfSubmit");
@@ -3091,10 +3431,11 @@ const UI = (() => {
   }
 
   function visForslag(svar) {
-    const dager = (forslag.dager || []).filter(d => d.dato);
-    const utenDato = (forslag.dager || []).length - dager.length;
+    // Dager uten dato blir med, med et felt der reiselederen velger datoen.
+    // Før ble de kastet uten at noen fikk gjort noe med det (E9).
+    const dager = (forslag.dager || []).filter(d => d.dato || (d.punkter || []).length || d.hotellNavn);
     const advarsler = (forslag.usikkert || []).slice();
-    if (utenDato) advarsler.push(`${utenDato} dag(er) manglet dato og er utelatt.`);
+    const fl = (n, en, flere) => `${n} ${n === 1 ? en : flere}`;
 
     if (!dager.length) {
       openSheet(`<h3>Fant ikke noe program</h3>
@@ -3110,7 +3451,7 @@ const UI = (() => {
     let utenTid = 0;
     let foreslatt = 0;
     const bolker = dager.map((d, i) => {
-      const dag = Api.fmtDay(d.dato);
+      const dag = d.dato ? Api.fmtDay(d.dato) : null;
 
       // Har dagen punkter fra før, skal ikke importen doble dem. Punkter
       // med samme tittel og tid som noe som finnes, krysses av fra
@@ -3151,7 +3492,13 @@ const UI = (() => {
 
       // Bare hotellet trenger adresse med én gang — det er det «hotellet»
       // i chatten slår opp mot. Andre steder kan fylles inn etterpå.
-      const hotell = d.hotellNavn ? `
+      const kjent = d.hotellNavn && Object.values(S.trip.places)
+        .find(p => p.name.trim().toLowerCase() === d.hotellNavn.trim().toLowerCase() && p.addr);
+      const hotell = d.hotellNavn && kjent ? `
+        <div class="hotellboks">
+          <div class="hotellnavn"><span>${esc(d.hotellNavn)}</span></div>
+          <small>Finnes alt i turen: ${esc(kjent.addr)}</small>
+        </div>` : d.hotellNavn ? `
         <div class="hotellboks">
           <div class="hotellnavn">
             <span>${esc(d.hotellNavn)}</span>
@@ -3172,7 +3519,11 @@ const UI = (() => {
         </div>` : "";
 
       return `<div style="margin-bottom:20px">
-        <div class="eyebrow" style="margin-bottom:7px">${esc(dag.label)}</div>
+        ${dag ? `<div class="eyebrow" style="margin-bottom:7px">${esc(dag.label)}</div>`
+          : `<div class="impdag"><b>Datoen sto ikke i filen</b>
+              <label style="display:block;margin-top:6px">Velg dato for denne dagen
+                <input type="date" data-dato="${i}" style="display:block;margin-top:4px"></label>
+              <small>Uten dato blir dagen ikke lagt inn.</small></div>`}
         ${valgDag}
         ${hotell}
         <div class="memberlist">${punkter || '<p class="muted" style="padding:10px">Ingen punkter.</p>'}</div>
@@ -3181,23 +3532,21 @@ const UI = (() => {
 
     const antall = dager.reduce((n, d) => n + (d.punkter || []).length, 0);
 
+    const merknader = [
+      foreslatt ? `${fl(foreslatt, "adresse er foreslått", "adresser er foreslått")} av appen og sto ikke i filen. Sjekk dem — er de feil, sender veibeskrivelsen folk feil sted.` : "",
+      utenTid ? `${fl(utenTid, "punkt mangler", "punkter mangler")} klokkeslett. De beholder rekkefølgen fra filen, og du kan fylle inn tid nå eller senere.` : "",
+      ...advarsler
+    ].filter(Boolean);
+
     openSheet(`<h3>Forslag fra filen</h3>
       <p class="muted" style="margin:6px 0 14px">
-        ${dager.length} dager og ${antall} punkter, i samme rekkefølge som i filen.</p>
-      ${foreslatt ? `<div class="card pad" style="padding-block:12px;margin-bottom:14px;border-left:3px solid var(--amber)">
-        <div class="eyebrow" style="color:var(--amber)">${foreslatt} adresser er foreslått av appen</div>
-        <p style="margin:7px 0 0;font-size:13.5px;color:var(--ink-2)">De sto ikke i filen. Appen har
-        fylt dem inn for steder den mener er kjente nok til at adressen er sikker — men den kan ta
-        feil, og da sender veibeskrivelsen folk feil sted. De er merket i lista under.</p></div>` : ""}
-      ${utenTid ? `<div class="card pad" style="padding-block:12px;margin-bottom:14px;border-left:3px solid var(--blue)">
-        <div class="eyebrow" style="color:var(--blue-ink)">${utenTid} punkter uten klokkeslett</div>
-        <p style="margin:7px 0 0;font-size:13.5px;color:var(--ink-2)">Filen oppga ingen tid for disse.
-        De beholder rekkefølgen sin uansett. Du kan fylle inn tid nå, eller senere.</p></div>` : ""}
-      ${advarsler.length ? `<div class="card pad" style="padding-block:12px;margin-bottom:16px;border-left:3px solid var(--amber)">
-        <div class="eyebrow" style="color:var(--amber)">Appen er usikker på</div>
-        <ul style="margin:8px 0 0;padding-left:18px;font-size:13.5px;color:var(--ink-2)">
-          ${advarsler.map(a => `<li>${esc(a)}</li>`).join("")}</ul></div>` : ""}
+        ${fl(dager.length, "dag", "dager")} og ${fl(antall, "punkt", "punkter")}, i samme rekkefølge som i filen.
+        ${merknader.length ? `Se ${fl(merknader.length, "merknad", "merknader")} nederst.` : ""}</p>
       ${bolker}
+      ${merknader.length ? `<div class="card pad" style="padding-block:12px;margin-bottom:16px;border-left:3px solid var(--amber)">
+        <div class="eyebrow" style="color:var(--amber)">Merknader</div>
+        <ul style="margin:8px 0 0;padding-left:18px;font-size:13.5px;color:var(--ink-2)">
+          ${merknader.map(a => `<li>${esc(a)}</li>`).join("")}</ul></div>` : ""}
       <p class="err" id="impErr" hidden></p>
       <button class="btn primary big" id="impSubmit">Legg inn i programmet</button>
       <button class="btn close" data-close>Avbryt</button>`);
@@ -3220,6 +3569,9 @@ const UI = (() => {
       const modusFelt = document.querySelector(`input[name="modus-${i}"]:checked`);
       const modus = modusFelt ? modusFelt.value : "legg";
       if (modus === "hopp") return;
+      const datoFelt = document.querySelector(`[data-dato="${i}"]`);
+      const dato = d.dato || (datoFelt ? datoFelt.value : "");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dato)) return;      // uten dato: hoppes over
 
       const punkter = (d.punkter || [])
         .map((p, j) => ({ p, j }))
@@ -3243,12 +3595,14 @@ const UI = (() => {
         hotell = sted(d.hotellNavn, d.hotellAdresse || (skrevet ? skrevet.value.trim() : ""), d.hotellNettside);
       }
       if (!punkter.length && !hotell && modus !== "erstatt") return;
-      pakke.push({ dato: d.dato, modus, hotell, punkter });
+      pakke.push({ dato, modus, hotell, punkter });
     });
 
-    if (!pakke.length) { err.textContent = "Ingenting er valgt."; err.hidden = false; return; }
-    if (pakke.some(d => d.modus === "erstatt") &&
-        !confirm("Erstatt sletter punktene som finnes på de dagene du har valgt det for. Fortsette?")) return;
+    const manglerDato = dager.some((d, i) => !d.dato && !(document.querySelector(`[data-dato="${i}"]`) || {}).value);
+    if (!pakke.length) {
+      err.textContent = manglerDato ? "Velg dato for dagen som mangler det." : "Ingenting er valgt.";
+      err.hidden = false; return;
+    }
 
     btn.disabled = true; btn.innerHTML = prikker() + " Legger inn";
     try {
@@ -3277,7 +3631,13 @@ const UI = (() => {
     if (!fraHistorikk) history.pushState({ side: "deltakere" }, "");
     render();
 
-    try { S.folk = await Api.tripMembers(S.trip.id); }
+    try {
+      const [folk, paar] = await Promise.all([
+        Api.tripMembers(S.trip.id),
+        S.trip.role === "leader" && S.trip.paaroerende ? Api.paaroerendeListe(S.trip.id).catch(() => null) : null
+      ]);
+      S.folk = folk; S.paar = paar;
+    }
     catch { S.folk = []; S.folkFeil = true; }
     if (S.side === "deltakere") render();
   }
@@ -3656,12 +4016,181 @@ const UI = (() => {
           <input type="checkbox" class="bryter" data-kjgodkjenn="${esc(k.id)}" ${k.godkjenn ? "checked" : ""}></label>
       </div></div>` : ""}
       <div class="setekart">${seteRader(k).map(rad).join("")}</div>
+      ${leder ? `<div class="kjknapper">
+        <button class="btn" data-fyllseter="${esc(k.id)}">Fyll ledige plasser</button>
+        <button class="btn" data-seteliste="${esc(k.id)}">Hvem sitter hvor</button>
+      </div>` : ""}
     </div>`;
   }
 
   /* Rom er ikke et setekart. Ingen midtgang, ingen nummerering man
      sikter på — bare navnet, hvor mange senger, og hvem som bor der.
      Derfor en liste og ikke et rutenett. */
+  /* Navn fra en innlimt romliste. De som ikke har blitt med ennå, venter;
+     de som har sagt «det er meg», står med hvem som bekreftet — og har
+     flere sagt ja, står det også. Reiselederen kan angre eller fjerne. */
+  function reservasjonsliste(liste) {
+    if (!liste.length) return "";
+    const venter = liste.filter(r => !r.bekreftetAv);
+    const bekreftet = liste.filter(r => r.bekreftetAv);
+    return `<div>
+      <div class="eyebrow" style="margin-bottom:8px">Fra romlista · ${liste.length}</div>
+      <div class="memberlist">
+        ${bekreftet.map(r => `<div class="person"><span>${esc(r.bekreftetAv)} er <b>${esc(r.navn)}</b>
+            <em>${esc(r.romnavn)}</em>${r.andre.length
+              ? `<br><small style="color:var(--amber)">Også sagt ja: ${esc(r.andre.join(", "))}</small>` : ""}</span>
+          <button class="linkbtn" data-angrerom="${esc(r.id)}">angre</button></div>`).join("")}
+        ${venter.map(r => `<div class="person"><span>${esc(r.navn)} <em>${esc(r.romnavn)}</em>
+            <br><small>Ikke med ennå. Blir spurt når hen blir med.</small></span>
+          <button class="linkbtn" data-fjernres="${esc(r.id)}">fjern</button></div>`).join("")}
+      </div></div>`;
+  }
+
+  /* Romlista limes inn fra Excel, Word eller Sheets. Kopierte celler blir
+     tekst med tabulator mellom kolonnene, og det leser vi uten noen
+     modell: det er gratis og tar ikke feil. Tre måter å skrive den på:
+       Rom 201 <tab> Ola Nordmann <tab> Kari Lund     (rom først, så folk)
+       Ola Nordmann <tab> Rom 201                     (navn, så rom)
+       Rom 201: Ola Nordmann, Kari Lund               (eller en blokk med
+                                                       romnavn over navnene) */
+  const normNavn = s => String(s || "").normalize("NFC").toLowerCase().replace(/\s+/g, " ").trim();
+  const navnLigner = (a, b) => {
+    const A = normNavn(a).split(" "), B = normNavn(b).split(" ");
+    return A.length > 1 && B.length > 1 && A[A.length - 1] === B[B.length - 1] && A[0].slice(0, 3) === B[0].slice(0, 3);
+  };
+  const serUtSomRom = c => /\d/.test(c) || /^(rom|room|hytte|leilighet)\b/i.test(c);
+
+  function lesRomliste(tekst) {
+    const rom = new Map();
+    const legg = (romnavn, navn) => {
+      const r = String(romnavn || "").trim(), n = String(navn || "").replace(/\s+/g, " ").trim();
+      if (!r || !n || serUtSomRom(n)) return;
+      if (!rom.has(r)) rom.set(r, []);
+      if (!rom.get(r).some(x => normNavn(x) === normNavn(n))) rom.get(r).push(n);
+    };
+    let blokk = null;
+    for (const linje of String(tekst || "").split(/\r?\n/)) {
+      const l = linje.trim();
+      if (!l) { blokk = null; continue; }
+      const celler = l.split(/\t|;/).map(c => c.trim()).filter(Boolean);
+      if (celler.length >= 2) {
+        if (/^(rom|navn|room|name)$/i.test(celler[0]) && /^(rom|navn|room|name|deltaker)/i.test(celler[1])) continue;
+        if (serUtSomRom(celler[0])) celler.slice(1).forEach(n => legg(celler[0], n));
+        else if (serUtSomRom(celler[celler.length - 1])) celler.slice(0, -1).forEach(n => legg(celler[celler.length - 1], n));
+        else celler.slice(1).forEach(n => legg(celler[0], n));
+        blokk = null;
+      } else if (l.includes(":")) {
+        const [r, resten] = l.split(/:(.*)/s);
+        resten.split(",").forEach(n => legg(r, n));
+        blokk = r.trim();
+      } else if (serUtSomRom(l)) {
+        blokk = l;
+      } else if (blokk) {
+        l.split(",").forEach(n => legg(blokk, n));
+      }
+    }
+    return [...rom.entries()].map(([navn, folk]) => ({ navn, folk }));
+  }
+
+  function sheetRomliste() {
+    openSheet(`<h3>Lim inn romliste</h3>
+      <p class="lede">Kopier rommene og navnene fra Excel, Word eller Sheets og lim dem inn her.
+        Én rad per rom med navnene ved siden av, eller én rad per person med rommet ved siden av.</p>
+      <div class="field"><label for="rlTekst">Romlista</label>
+        <textarea id="rlTekst" rows="8" placeholder="Rom 201	Ola Nordmann	Kari Lund&#10;Rom 202	Per Hansen"></textarea></div>
+      <p class="err" id="rlErr" hidden></p>
+      <button class="btn primary big" id="rlLes">Les lista</button>
+      <button class="btn close" data-close>Avbryt</button>`);
+
+    $("rlLes").addEventListener("click", () => {
+      const rom = lesRomliste($("rlTekst").value);
+      if (!rom.length) {
+        $("rlErr").textContent = "Fant ingen rom med navn i teksten. Sjekk at hvert rom har et navn eller nummer.";
+        $("rlErr").hidden = false; return;
+      }
+      visRomliste(rom);
+    });
+  }
+
+  /* Forslaget før noe lagres. Hvert navn er koblet til noen på turen,
+     ligner på noen (da må reiselederen krysse av selv), eller venter. */
+  function visRomliste(rom) {
+    const alle = (S.rom && S.rom.alle) || [];
+    let n = 0;
+    const rader = rom.map((r, i) => `<div style="margin-bottom:16px">
+      <div class="eyebrow" style="margin-bottom:7px">${esc(r.navn)} · ${r.folk.length}</div>
+      <div class="memberlist">${r.folk.map((navn, j) => {
+        const lik = alle.filter(p => normNavn(p.navn) === normNavn(navn));
+        const ligner = lik.length ? [] : alle.filter(p => navnLigner(p.navn, navn));
+        n++;
+        if (lik.length === 1) return `<div class="person"><span>${esc(navn)}</span>
+          <span class="tag moss" data-rl="${i}-${j}" data-bruker="${esc(lik[0].id)}">med på turen</span></div>`;
+        if (ligner.length === 1) return `<label class="person"><span>${esc(navn)}<br>
+          <small>Ligner på <b>${esc(ligner[0].navn)}</b>. Kryss av hvis det er hen.</small></span>
+          <input type="checkbox" data-rl="${i}-${j}" data-bruker="${esc(ligner[0].id)}"></label>`;
+        return `<div class="person"><span>${esc(navn)}<br><small>Ikke med ennå. Blir spurt når hen blir med.</small></span>
+          <span class="tag" data-rl="${i}-${j}">venter</span></div>`;
+      }).join("")}</div></div>`).join("");
+
+    openSheet(`<h3>Romlista</h3>
+      <p class="lede">${rom.length} rom og ${n} navn. Finnes rommet fra før, legges folk inn der.
+        Har noen alt et rom, flyttes de.</p>
+      ${rader}
+      <p class="err" id="rlErr" hidden></p>
+      <button class="btn primary big" id="rlLagre">Lagre romlista</button>
+      <button class="btn close" data-close>Avbryt</button>`);
+
+    $("rlLagre").addEventListener("click", async e => {
+      const b = e.currentTarget;
+      const pakke = rom.map((r, i) => ({
+        navn: r.navn,
+        folk: r.folk.map((navn, j) => {
+          const el = $("sheet").querySelector(`[data-rl="${i}-${j}"]`);
+          const bruker = el && el.dataset.bruker && (el.type !== "checkbox" || el.checked) ? el.dataset.bruker : null;
+          return { user_id: bruker, navn };
+        })
+      }));
+      b.disabled = true; b.innerHTML = prikker() + " Lagrer";
+      try {
+        const svar = await Api.lagreRomliste(S.trip.id, pakke);
+        closeSheet();
+        await aapneRom(true);
+        hentMegTall(true);
+        toast(`${svar.plassert || 0} plassert${svar.venter ? `, ${svar.venter} venter på å bli med` : ""}.`);
+      } catch (err) {
+        b.disabled = false; b.textContent = "Lagre romlista";
+        $("rlErr").textContent = err.message; $("rlErr").hidden = false;
+      }
+    });
+  }
+
+  /* «Er du Per Ola Nordmann?» Spørres når en deltaker åpner turen og navnet
+     ligner på et navn på romlista som ingen har bekreftet. Basen sjekker
+     det samme en gang til når svaret kommer (Utvidelse 30). */
+  const romSpurt = new Set();
+  async function spoerOmRomplass(tripId) {
+    const forslag = (await Api.mineRomforslag(tripId)).filter(f => !romSpurt.has(f.id));
+    if (!forslag.length || !S.trip || S.trip.id !== tripId || S.omvis) return;
+    const f = forslag[0];
+    romSpurt.add(f.id);
+    openSheet(`<h3>Er du ${esc(f.navn)}?</h3>
+      <p class="lede">Reiselederen har satt <b>${esc(f.navn)}</b> på <b>${esc(f.rom)}</b>.
+        Er det deg, får du sengen, og navnet ditt i appen blir som på lista.</p>
+      <p class="err" id="rsErr" hidden></p>
+      <button class="btn primary big" id="rsJa">Ja, det er meg</button>
+      <button class="btn" style="width:100%;margin-top:10px" id="rsNei">Nei, det er ikke meg</button>`);
+    $("rsJa").addEventListener("click", async e => {
+      e.currentTarget.disabled = true;
+      try {
+        const romnavn = await Api.bekreftRomplass(f.id);
+        closeSheet();
+        await openTrip(tripId);
+        toast(`Du bor på ${romnavn || f.rom}.`);
+      } catch (err) { $("rsErr").textContent = err.message; $("rsErr").hidden = false; }
+    });
+    $("rsNei").addEventListener("click", async () => { closeSheet(); await Api.avvisRomforslag(f.id).catch(() => {}); });
+  }
+
   function viewRom() {
     const leder = S.trip.role === "leader";
     if (S.romFeil) return '<p class="muted">Klarte ikke hente romfordelingen. Sjekk nettet og prøv igjen.</p>';
@@ -3670,7 +4199,8 @@ const UI = (() => {
     const bytter = S.rom.bytter || [];
 
     const nyknapp = leder
-      ? `<button class="btn big" data-nyttrom="1">Legg til rom</button>`
+      ? `<div class="stack"><button class="btn big" data-nyttrom="1">Legg til rom</button>
+           <button class="btn" data-romliste="1">Lim inn romliste</button></div>`
       : "";
 
     if (!rom.length) return `
@@ -3703,8 +4233,9 @@ const UI = (() => {
             <span>${esc(p.navn)}${p.leder ? ' <em>reiseleder</em>' : ""}</span>
             <button class="linkbtn" data-settrom="${esc(p.id)}">gi rom</button>
           </div>`).join("")}</div>
-          <button class="btn" style="width:100%;margin-top:10px" data-fyllalle="1">Fyll de ledige sengene</button>
         </div></div>` : ""}
+
+      ${leder ? reservasjonsliste(S.rom.reservasjoner || []) : ""}
 
       ${romgrupper(rom, leder, bytter)}
       ${nyknapp}`;
@@ -3862,7 +4393,7 @@ const UI = (() => {
     if (!liste.length) return `
       ${utenNett(S.kontakt)}
       <p class="muted" style="margin:0">${leder
-        ? "Legg inn deg selv, den andre reiselederen og nummeret til skolen. Alle på turen ser dem, også uten nett."
+        ? "Legg inn deg selv, de andre reiselederne og et nummer hjemme, for eksempel skolen, klubben eller kontoret. Alle på turen ser dem, også uten nett."
         : "Reiselederen har ikke lagt inn noen nummer ennå."}</p>
       ${nyknapp}`;
 
@@ -3951,8 +4482,13 @@ const UI = (() => {
         og lukker den når alle er med. Ingen andre enn reiselederne ser den.</p>
       <button class="btn primary big" data-nyttopprop="1">Start et opprop</button>`;
 
-    const mangler = folk.filter(p => !p.her);
-    const her = folk.filter(p => p.her);
+    // Gjelder runden ett kjøretøy, telles de som sitter der. De som ikke
+    // har plass i noe kjøretøy den dagen, står for seg nederst, så ingen
+    // faller ut av tellingen (L6).
+    const iRunden = folk.filter(p => p.iKjoretoy);
+    const utenPlass = runde.kjoretoy_id ? folk.filter(p => !p.iKjoretoy && p.utenPlass) : [];
+    const mangler = iRunden.filter(p => !p.her);
+    const her = iRunden.filter(p => p.her);
     const rad = p => `<div class="person">
       <button class="pkhake ${p.her ? "av" : ""}" data-hake="${esc(p.id)}"
         aria-pressed="${p.her}" aria-label="${p.her ? "Fjern haken for" : "Hak av"} ${esc(p.navn)}"
@@ -3961,8 +4497,8 @@ const UI = (() => {
     </div>`;
 
     return `
-      <p class="muted" style="margin:0">${her.length} av ${folk.length} er med${
-        runde.navn ? ` · ${esc(runde.navn)}` : ""}.</p>
+      <p class="muted" style="margin:0">${her.length} av ${iRunden.length} er med${
+        runde.kjoretoyNavn ? ` i <b>${esc(runde.kjoretoyNavn)}</b>` : ""}${runde.navn ? ` · ${esc(runde.navn)}` : ""}.</p>
 
       ${mangler.length ? `<div>
         <div class="eyebrow" style="margin-bottom:8px;color:var(--amber)">Mangler · ${mangler.length}</div>
@@ -3974,6 +4510,11 @@ const UI = (() => {
       ${her.length ? `<div>
         <div class="eyebrow" style="margin-bottom:8px;color:var(--moss)">Med · ${her.length}</div>
         <div class="gruppe"><div class="memberlist opprop" style="padding:4px 14px">${her.map(rad).join("")}</div></div>
+      </div>` : ""}
+
+      ${utenPlass.length ? `<div>
+        <div class="eyebrow" style="margin-bottom:8px">Uten plass i noe kjøretøy · ${utenPlass.length}</div>
+        <div class="gruppe"><div class="memberlist opprop" style="padding:4px 14px">${utenPlass.map(rad).join("")}</div></div>
       </div>` : ""}
 
       <button class="btn big" data-lukkopprop="${esc(runde.id)}">Avslutt oppropet</button>`;
@@ -4259,6 +4800,198 @@ const UI = (() => {
     });
   }
 
+  /* ───────── fase 6 ───────── */
+
+  /* L6: hvilket kjøretøy oppropet gjelder. Har turen ingen kjøretøy,
+     starter det rett for hele turen. */
+  async function sheetNyttOpprop() {
+    let kart = null;
+    try { kart = await Api.setekart(S.trip.id); } catch { /* uten kjøretøy */ }
+    const kj = (kart && kart.kjoretoy) || [];
+    if (!kj.length) {
+      try { await Api.nyttOpprop(S.trip.id, ""); await aapneOpprop(true); } catch (e) { toast(e.message); }
+      return;
+    }
+    openSheet(`<h3>Hvem skal telles?</h3>
+      <p class="lede">Velg et kjøretøy, så teller du bare dem som sitter der. De uten plass står for seg.</p>
+      <div class="gruppe"><div class="list">
+        <button class="listrow" data-startopprop=""><div class="grow"><div class="nm">Hele turen</div></div>
+          <span class="chev">${ICON.chev}</span></button>
+        ${kj.map(k => `<button class="listrow" data-startopprop="${esc(k.id)}">
+          <div class="grow"><div class="nm">${esc(k.navn)}</div>
+            <div class="sub">${k.seter.length} sitter her${k.dato ? " · " + esc(cap(Api.fmtDay(k.dato).label)) : ""}</div></div>
+          <span class="chev">${ICON.chev}</span></button>`).join("")}
+      </div></div>
+      <button class="btn close" data-close>Avbryt</button>`);
+  }
+
+  /* L7: hvem sitter hvor, sortert på plass eller navn. For sjåføren eller
+     billettkontrollen. */
+  function sheetSeteliste(kjId, etter) {
+    const k = ((S.setekart || {}).kjoretoy || []).find(x => x.id === kjId);
+    if (!k) return;
+    const rader = k.seter.map(s2 => ({ plass: plassnavn(k, s2.nr), nr: s2.nr, navn: s2.hvem || "" }))
+      .sort((a, b) => etter === "navn" ? a.navn.localeCompare(b.navn, "nb") : a.nr - b.nr);
+    openSheet(`<h3>${esc(k.navn)}</h3>
+      <p class="lede">${k.seter.length} av ${k.plasser} plasser er tatt.</p>
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <button class="btn${etter === "navn" ? "" : " primary"}" data-seteliste="${esc(k.id)}" data-etter="plass">Etter plass</button>
+        <button class="btn${etter === "navn" ? " primary" : ""}" data-seteliste="${esc(k.id)}" data-etter="navn">Etter navn</button>
+      </div>
+      <div class="memberlist">${rader.map(r => `<div class="person"><span><b class="mono">${esc(r.plass)}</b></span>
+        <span>${esc(r.navn)}</span></div>`).join("") || '<p class="muted" style="padding:10px">Ingen har plass ennå.</p>'}</div>
+      <button class="btn close" data-close>Lukk</button>`);
+  }
+
+  /* L3: turkoden som QR-kode og lenke. Lenken fyller inn koden når den
+     åpnes. QR-koden lages på telefonen (vendor/qrcode.js, MIT). */
+  const DELE_URL = "https://tripmateub.github.io/tripmate/";
+  function sheetDelKode() {
+    const lenke = `${DELE_URL}?kode=${encodeURIComponent(S.trip.code)}`;
+    let svg = "";
+    try {
+      const q = qrcode(0, "M"); q.addData(lenke); q.make();
+      svg = q.createSvgTag({ cellSize: 6, margin: 2, scalable: true });
+    } catch { /* uten QR viser vi bare lenken */ }
+    openSheet(`<h3>Del turkoden</h3>
+      <p class="lede">Vis QR-koden på tavla, eller send lenken. Den fyller inn koden <b class="mono">${esc(S.trip.code)}</b> når den åpnes.</p>
+      ${svg ? `<div class="qrkode" aria-label="QR-kode for å bli med på turen">${svg}</div>` : ""}
+      <div class="field"><label for="dkLenke">Lenke</label><input id="dkLenke" readonly value="${esc(lenke)}"></div>
+      <div class="stack">
+        <button class="btn primary" id="dkKopier">Kopier lenken</button>
+        <button class="btn" id="dkDel">Del</button>
+      </div>
+      <button class="btn close" data-close>Lukk</button>`);
+    $("dkKopier").addEventListener("click", async () => {
+      try { await navigator.clipboard.writeText(lenke); toast("Lenken er kopiert."); }
+      catch { $("dkLenke").select(); toast("Merk lenken og kopier den."); }
+    });
+    $("dkDel").addEventListener("click", async () => {
+      const tekst = `Bli med på ${S.trip.name} i TripMate: ${lenke}`;
+      const Share = nativPlugin("Share");
+      try {
+        if (erNativ() && Share) await Share.share({ text: tekst, url: lenke });
+        else if (navigator.share) await navigator.share({ text: tekst, url: lenke });
+        else { await navigator.clipboard.writeText(lenke); toast("Lenken er kopiert."); }
+      } catch { /* avbrutt */ }
+    });
+  }
+
+  /* L8: dokumenter. Egen side, som pakkelista. */
+  async function aapneDokumenter(fraHistorikk) {
+    S.side = "dokumenter"; S.dok = null; S.dokFeil = false;
+    if (!fraHistorikk) history.pushState({ side: "dokumenter" }, "");
+    render();
+    try { S.dok = await Api.dokumenter(S.trip.id); } catch { S.dok = []; S.dokFeil = true; }
+    if (S.side === "dokumenter") render();
+  }
+  const storrelse = b => b > 1048576 ? (b / 1048576).toFixed(1).replace(".", ",") + " MB" : Math.max(1, Math.round(b / 1024)) + " kB";
+  function viewDokumenter() {
+    if (S.dokFeil) return '<p class="muted">Klarte ikke hente dokumentene. Sjekk nettet og prøv igjen.</p>';
+    if (!S.dok) return venter("Henter dokumentene");
+    const leder = S.trip.role === "leader";
+    const felles = S.dok.filter(d => d.felles), mine = S.dok.filter(d => !d.felles);
+    const rad = d => `<div class="person">
+      <button class="linkbtn dokrad" data-aapnedok="${esc(d.sti)}"><b>${esc(d.navn)}</b><br>
+        <small>${esc(storrelse(d.storrelse))} · ${esc(shortStamp(d.created_at))}</small></button>
+      ${d.min || (d.felles && leder) ? `<button class="linkbtn fare" data-slettdok="${esc(d.id)}" data-sti="${esc(d.sti)}" data-navn="${esc(d.navn)}">slett</button>` : ""}
+    </div>`;
+    const opp = (felles2, tekst) => `<label class="btn filknapp" style="margin-top:10px">${tekst}
+      <input type="file" class="skjultfil" accept="application/pdf,image/*" data-lastopp="${felles2 ? "felles" : "egen"}"></label>`;
+    return `
+      <div>
+        <div class="eyebrow" style="margin-bottom:8px">Fra reiselederen</div>
+        ${felles.length ? `<div class="memberlist">${felles.map(rad).join("")}</div>`
+          : `<p class="muted" style="margin:0">${leder ? "Legg inn heftet, forsikringen eller annet alle trenger." : "Reiselederen har ikke lagt inn noe ennå."}</p>`}
+        ${leder ? opp(true, "Last opp for alle") : ""}
+      </div>
+      <div>
+        <div class="eyebrow" style="margin-bottom:8px">Mine dokumenter</div>
+        <p class="muted" style="margin:0 0 8px">Bare du ser disse, ikke reiselederne heller. For eksempel billetten din.</p>
+        ${mine.length ? `<div class="memberlist">${mine.map(rad).join("")}</div>` : ""}
+        ${opp(false, "Last opp mitt eget")}
+      </div>
+      <p class="muted">PDF eller bilde, maks 10 MB. Dokumentene slettes sammen med turen.</p>`;
+  }
+
+  /* L9: programmet som kalenderfil. Hvert punkt med klokkeslett blir en
+     hendelse med adresse, så iPhone selv kan varsle «Tid for å dra». */
+  function lagKalender() {
+    const t = S.trip;
+    const rens = x => String(x || "").replace(/\\/g, "\\\\").replace(/([,;])/g, "\\$1").replace(/\r?\n/g, "\\n");
+    // Maks 75 byte per linje, slik standarden vil. Æ, ø og å er to byte
+    // hver, så det telles i byte og ikke i tegn.
+    const kod = new TextEncoder();
+    const brett = linje => {
+      const ut = []; let del = "", byte = 0;
+      for (const tegn of linje) {
+        const b = kod.encode(tegn).length;
+        if (byte + b > 73) { ut.push(del); del = " "; byte = 1; }
+        del += tegn; byte += b;
+      }
+      ut.push(del); return ut.join("\r\n");
+    };
+    const tid = (dato, kl) => dato.replace(/-/g, "") + "T" + kl.replace(":", "") + "00";
+    const pluss = (kl, min) => { const m = minutt(kl) + min; return String(Math.min(23, Math.floor(m / 60))).padStart(2, "0") + ":" + String(m >= 1440 ? 59 : m % 60).padStart(2, "0"); };
+    const stempel = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
+    const linjer = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//TripMate//NO", "CALSCALE:GREGORIAN", `X-WR-CALNAME:${rens(t.name)}`];
+    for (const d of t.days) for (const i of d.items) {
+      if (!i.t) continue;
+      const p = i.place ? t.places[i.place] : null;
+      linjer.push("BEGIN:VEVENT", `UID:${i.id}@tripmate`, `DTSTAMP:${stempel}`,
+        `DTSTART:${tid(d.date, i.t)}`, `DTEND:${tid(d.date, slutt(i) || pluss(i.t, 30))}`,
+        `SUMMARY:${rens(i.title)}`);
+      if (p) linjer.push(`LOCATION:${rens([p.name, p.addr].filter(Boolean).join(", "))}`);
+      if (i.note) linjer.push(`DESCRIPTION:${rens(i.note)}`);
+      linjer.push("END:VEVENT");
+    }
+    linjer.push("END:VCALENDAR");
+    return linjer.map(brett).join("\r\n") + "\r\n";
+  }
+  async function delKalender() {
+    const ics = lagKalender();
+    if (!/BEGIN:VEVENT/.test(ics)) return toast("Programmet har ingen punkter med klokkeslett ennå.");
+    const navn = (S.trip.name.replace(/[^\p{L}\p{N} -]/gu, "").trim() || "tur") + ".ics";
+    const fil = new File([ics], navn, { type: "text/calendar" });
+    if (erNativ() && await delNativt(fil)) return;
+    if (navigator.canShare && navigator.canShare({ files: [fil] })) {
+      try { await navigator.share({ files: [fil] }); return; } catch (e) { if (e && e.name === "AbortError") return; }
+    }
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(fil); a.download = navn;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 20000);
+    toast("Kalenderfila er lastet ned. Åpne den for å legge programmet i kalenderen.");
+  }
+
+  /* L12: søk i chattene. Treffet åpner chatten og blar til meldingen. */
+  let sokTimer = null;
+  async function sok(tekst) {
+    const boks = $("sokTreff");
+    if (!boks) return;
+    if (String(tekst).trim().length < 2) { boks.innerHTML = ""; $("chatlistBoks").hidden = false; return; }
+    $("chatlistBoks").hidden = true;
+    boks.innerHTML = venter("Søker");
+    try {
+      const treff = await Api.sokMeldinger(S.trip.id, tekst);
+      const navn = id => (S.trip.channels.find(c => c.id === id) || {}).name || "Chat";
+      boks.innerHTML = treff.length ? `<div class="memberlist">${treff.map(m => `<button class="person sokrad" data-soktreff="${esc(m.id)}" data-kanal="${esc(m.channel_id)}">
+          <span><b>${esc(m.author_name)}</b> <em>${esc(navn(m.channel_id))} · ${esc(shortStamp(m.created_at))}</em><br>
+          <small>${esc(String(m.txt || "").slice(0, 140))}</small></span></button>`).join("")}</div>`
+        : `<p class="muted" style="padding:10px 0">Ingen meldinger med «${esc(tekst.trim())}».</p>`;
+    } catch { boks.innerHTML = `<p class="muted">Klarte ikke søke. Sjekk nettet.</p>`; }
+  }
+  async function hoppTilTreff(kanal, id) {
+    S.tab = "chat";
+    await openChat(kanal);
+    for (let n = 0; n < 6 && !document.getElementById("msg-" + id); n++) {
+      if (!Api.harEldre(kanal)) break;
+      await Api.loadMoreMessages(kanal).catch(() => {});
+      render();
+    }
+    hoppTil(id);
+  }
+
   /* ───────── omvisning ─────────
      En tur settes opp én gang, av en som aldri har gjort det før, og
      ofte kvelden før avreise. Den første omvisningen var fire sider
@@ -4292,16 +5025,16 @@ const UI = (() => {
         t: "Hvert kjøretøy har sin dag og sitt kart. Du bestemmer om deltakerne velger selv, eller om du fordeler." },
       { tab: "turen", maal: '[data-side="rom"]',
         h: "Rom virker på samme måte",
-        t: "Legg inn rommene, og la appen fylle de ledige sengene. To brytere styrer om deltakerne kan flytte seg." },
+        t: "Legg inn rommene, eller lim inn romlista fra Excel. To brytere styrer om deltakerne kan flytte seg." },
       { tab: "turen", maal: '[data-side="kontakt"]',
         h: "Nødnummer ligger alltid tilgjengelig",
-        t: "Deg, den andre reiselederen, skolen. Ett trykk for å ringe, og det virker uten nett." },
+        t: "Deg, de andre reiselederne og et nummer hjemme. Ett trykk for å ringe, og det virker uten nett." },
       { tab: "turen", maal: '[data-side="opprop"]',
         h: "Opprop på rasteplassen",
         t: "Hak av navnene. De som mangler står øverst. Bare reiseledere ser lista." },
       { tab: "turen", maal: "[data-copy]",
         h: "Turkoden slipper folk inn",
-        t: "Del den med klassen. Kommer den ut til flere enn den skulle, lager du en ny under." }
+        t: "Del den med gruppa. Kommer den ut til flere enn den skulle, lager du en ny under." }
     ],
     member: [
       { tab: "program", maal: ".naakort",
@@ -4321,7 +5054,7 @@ const UI = (() => {
         t: "Velg plass, eller se hvilken du har fått. Vil du sitte et annet sted, spør du den som sitter der." },
       { tab: "turen", maal: '[data-side="kontakt"]',
         h: "Nummeret du ringer hvis noe skjer",
-        t: "Reiselederne og skolen, ett trykk unna. Lista virker uten nett." },
+        t: "Reiselederne og et nummer hjemme, ett trykk unna. Lista virker uten nett." },
       { tab: "meg", maal: '[data-sheet="varsler"]',
         h: "Slå på varsler her",
         t: "Uten varsler er telefonen stille når reiselederen skriver noe viktig." }
@@ -4574,6 +5307,12 @@ const UI = (() => {
           <small>Bildene slettes automatisk 30 dager etter siste programdag.</small></span>
       </label>
       <label class="pick" style="margin-top:10px">
+        <input type="checkbox" id="paaroerendePaa" ${S.trip.paaroerende ? "checked" : ""}>
+        <span><b>Be om nærmeste pårørende</b><br>
+          <small>Hver deltaker oppgir navn og telefon, og krysser av for at det er greit.
+            Bare reiselederne ser det. Skrur du av, slettes alt som er samlet inn.</small></span>
+      </label>
+      <label class="pick" style="margin-top:10px">
         <input type="checkbox" id="krevGodkjenning" ${S.trip.krevGodkjenning ? "checked" : ""}>
         <span><b>Krev godkjenning for å bli med</b><br>
           <small>Nye deltakere må slippes inn av en reiseleder. Turkoden alene holder ikke.</small></span>
@@ -4605,11 +5344,15 @@ const UI = (() => {
         <div class="eyebrow" style="margin-bottom:8px">Med på turen · ${med.length}</div>
         <div class="memberlist">${med.map(p => `
           <div class="person">
-            <span>${esc(p.name)}${p.me ? " <em>deg</em>" : ""}${p.role === "leader" ? ' <em>reiseleder</em>' : ""}</span>
+            <span>${esc(p.name)}${p.me ? " <em>deg</em>" : ""}${p.role === "leader" ? ' <em>reiseleder</em>' : ""}${
+              leder && S.paar ? (S.paar.get(p.id)
+                ? `<br><small>Pårørende: ${esc(S.paar.get(p.id).navn)} · <a href="tel:${esc(telnummer(S.paar.get(p.id).telefon))}">${esc(S.paar.get(p.id).telefon)}</a></small>`
+                : `<br><small style="color:var(--amber)">Mangler pårørende</small>`) : ""}</span>
             ${leder && !p.me && !p.skjult ? `<span style="display:flex;gap:10px;flex:none">
               ${p.role === "leader"
                 ? (ledere.length > 1 ? `<button class="linkbtn" data-rolle="${esc(p.id)}" data-til="member">fjern rolle</button>` : "")
                 : `<button class="linkbtn" data-rolle="${esc(p.id)}" data-til="leader">gjør til leder</button>`}
+              <button class="linkbtn" data-rettnavn="${esc(p.id)}" data-navn="${esc(p.name)}">rett navn</button>
               <button class="linkbtn" style="color:var(--danger)" data-fjern="${esc(p.id)}" data-navn="${esc(p.name)}">fjern</button>
             </span>` : ""}
           </div>`).join("")}</div>
@@ -4642,7 +5385,7 @@ const UI = (() => {
 
       <h1>${start ? "TripMate" : harAlt ? "Bytt e-postadresse" : kobler ? "Sikre kontoen" : "Logg inn"}</h1>
       <p class="lede">${start
-        ? "Program, beskjeder og veibeskrivelse for klasseturen."
+        ? "Program, beskjeder og veibeskrivelse for gruppa som reiser."
         : harAlt
         ? `Du er innlogget som <b>${esc(Api.minEpost() || "")}</b>. Skriv den nye adressen, så sender vi en kode dit.`
         : kobler
@@ -4654,8 +5397,6 @@ const UI = (() => {
           <label for="aPost">E-post</label>
           <input id="aPost" type="email" inputmode="email" autocomplete="email"
                  autocapitalize="none" spellcheck="false" placeholder="navn@eksempel.no">
-          <small style="display:block;margin-top:6px;font-size:12.5px;color:var(--ink-3)">
-            Bruk en privat adresse — skolemailen blokkerer ofte koden.</small>
         </div>
         <p class="err" id="aFeil" hidden></p>
         <button class="btn primary big" type="submit" id="aSend">
@@ -4704,8 +5445,7 @@ const UI = (() => {
       <button class="tilbake" id="authTilbake">${ICON.chevL} Bruk en annen adresse</button>
       <h1>Sjekk e-posten</h1>
       <p class="lede">Vi sendte en kode til <b>${esc(epost)}</b>. Den er gyldig i en time.</p>
-      <p class="soppelpost"><b>Finner du den ikke?</b> Se i søppelpost. Skolemailen blokkerer
-        ofte engangskoder, eller legger dem der — bruk heller Gmail, iCloud eller Outlook.</p>
+      <p class="soppelpost"><b>Finner du ikke koden?</b> Se i søppelpost.</p>
 
       <form id="kodeForm" novalidate>
         <div class="field">
@@ -4770,7 +5510,7 @@ const UI = (() => {
     if (!turer.length) return true;
 
     const ledet = turer.filter(t => t.role === "leader").length;
-    return confirm(
+    return bekreft(
       `Som gjest er du med på ${turer.length} tur${turer.length === 1 ? "" : "er"}` +
       (ledet ? `, og reiseleder for ${ledet} av dem` : "") + ".\n\n" +
       "Logger du inn med e-post nå, slettes gjestekontoen, og turene følger ikke med — " +
@@ -5064,8 +5804,9 @@ const UI = (() => {
            <p style="margin:0;font-size:13.5px;color:var(--ink-2)">${esc(S.varselTest.tekst)}</p></div>` : ""}
       </div>`}
 
-      ${nativ || altVirker ? "" : `<div>
-        <div class="eyebrow" style="margin:20px 0 8px">Virker det?</div>
+      ${nativ || altVirker ? "" : `<details class="feilsok">
+        <summary>Virker ikke varslene?</summary>
+        <div class="eyebrow" style="margin:14px 0 8px">Hvert ledd i kjeden</div>
         <div class="card pad" style="padding-block:6px">
           ${linje("Nettleseren kan varsle", st !== "umulig", st === "umulig" ? "Ikke støttet her" : "Ja")}
           ${iOS ? linje("Ligger på hjemskjermen", paaHjem, paaHjem ? "Ja" : "Kreves på iPhone") : ""}
@@ -5085,7 +5826,7 @@ const UI = (() => {
         <p class="muted" style="margin-top:8px">
           Den første viser at telefonen kan vise varsler. Den andre går hele veien om serveren,
           og er den som avslører om noe mangler der. Du får aldri varsel om dine egne meldinger.</p>
-      </div>`}`;
+      </details>`}`;
   }
 
   function settOppVarsler() {
@@ -5157,13 +5898,13 @@ const UI = (() => {
   function sheetEndreTur() {
     const t = S.trip;
     openSheet(`<h3>Endre turen</h3>
-      <p class="muted" style="margin:6px 0 14px">Navn, klasse og når turen starter.
+      <p class="muted" style="margin:6px 0 14px">Navn, gruppe og når turen starter.
         Turkoden endrer seg ikke.</p>
       <form id="turForm">
         <div class="field"><label for="tuNavn">Navn på turen</label>
           <input id="tuNavn" value="${esc(t.name)}" maxlength="80"></div>
-        <div class="field"><label for="tuOrg">Klasse eller gruppe</label>
-          <input id="tuOrg" value="${esc(t.org || "")}" maxlength="80" placeholder="2STB Tryggheim"></div>
+        <div class="field"><label for="tuOrg">Gruppe</label>
+          <input id="tuOrg" value="${esc(t.org || "")}" maxlength="80" placeholder="Sandnes IL G16, salgsavdelingen eller 10B"></div>
         ${t.days.length ? `<div class="field"><label for="tuDato">Første dag</label>
           <input id="tuDato" type="date" value="${esc(t.days[0].date)}">
           <small style="display:block;margin-top:5px;font-size:12.5px;color:var(--ink-3)">
@@ -5272,7 +6013,7 @@ const UI = (() => {
         <div class="person" style="align-items:flex-start">
           <span class="chattekst"><b>Alt</b>
             <small>Hver eneste melding i chatten. Greit i en liten gruppe, men i en chat
-              med hele klassen blir det mange.</small></span>
+              med hele gruppa blir det mange.</small></span>
         </div>
         <div class="person" style="align-items:flex-start">
           <span class="chattekst"><b>Det viktige</b>
@@ -5299,26 +6040,50 @@ const UI = (() => {
       <button class="btn close" data-close>Lukk</button>`);
   }
 
+  /* Om appen og personvern (E19). Den gamle teksten sa at alle fikk en
+     anonym identitet (e-post finnes nå) og at man måtte lage en ny tur
+     når koden kom på avveie (Ny turkode finnes). */
+  const PERSONVERN_URL = "https://tripmateub.github.io/tripmate/personvern.html";
   function sheetAbout() {
-    openSheet(`<h3>Om appen</h3>
+    openSheet(`<h3>Om appen og personvern</h3>
       <p style="margin:10px 0;font-size:14.5px;color:var(--ink-2)">
-        TripMate samler program, beskjeder og veibeskrivelser for én klassetur. Når noen avtaler
-        et møtested i chatten, kobler appen det mot programmet og finner riktig adresse for den dagen.</p>
+        TripMate samler program, beskjeder og veibeskrivelser for en gruppe som reiser sammen. Når noen
+        avtaler et møtested i chatten, kobler appen det mot programmet og finner riktig adresse.</p>
       <div class="card pad" style="padding-block:12px;margin-top:6px">
         <dl class="kv">
-          <dt>Lagring</dt><dd>Program og meldinger ligger i en database. Du ser bare turer du er medlem av.</dd>
-          <dt>Pålogging</dt><dd>Enheten din får en anonym identitet. Navnet er selvvalgt.</dd>
-          <dt>Kart</dt><dd>Adressen åpnes i Google Maps eller Apple Maps.</dd>
+          <dt>Lagring</dt><dd>I en database hos Supabase i EU (Irland). Du ser bare turer du er med på.</dd>
+          <dt>Innlogging</dt><dd>Med e-post, eller som gjest. En gjestekonto finnes bare på denne telefonen.</dd>
+          <dt>Sletting</dt><dd>En tur slettes 60 dager etter siste programdag. Bilder slettes etter 30 dager.
+            Du kan slette kontoen din under Meg.</dd>
+          <dt>Kart</dt><dd>Adressen åpnes i Google Maps eller Apple Kart når du trykker på veibeskrivelse.</dd>
           <dt>Vær</dt><dd>Værmelding og værsymboler fra Yr og MET Norway. Symbolene er © 2015–2017 Yr, MIT-lisens.</dd>
         </dl>
       </div>
-      <p class="muted" style="margin-top:12px">Turkoden er en nøkkel til et rom. Alle som har den kan bli
-      med og lese alt som skrives i turen — del den bare med dem som skal være med, og lag en ny tur
-      hvis koden kommer på avveie.</p>
+      <p class="muted" style="margin-top:12px">Turkoden slipper folk inn på turen. Del den bare med dem som skal være med.
+        Kommer den på avveie, kan reiselederen lage en ny under Turen.</p>
+      <a class="btn" style="width:100%;margin-top:6px" href="${PERSONVERN_URL}" target="_blank" rel="noopener">Les personvernerklæringen</a>
       <button class="btn close" data-close>Lukk</button>`);
   }
 
   /* ───────────────── hendelser ───────────────── */
+  document.addEventListener("change", async e => {
+    if (e.target.dataset && e.target.dataset.lastopp) {
+      const fil = e.target.files && e.target.files[0];
+      const felles = e.target.dataset.lastopp === "felles";
+      e.target.value = "";
+      if (!fil) return;
+      toast("Laster opp " + fil.name + "…");
+      try { await Api.lastOppDokument(S.trip.id, fil, felles); await aapneDokumenter(true); toast("Lagt inn."); }
+      catch (err) { toast(err.message || "Klarte ikke laste opp."); }
+      return;
+    }
+  });
+  document.addEventListener("input", e => {
+    if (e.target.id !== "sokFelt") return;
+    clearTimeout(sokTimer);
+    sokTimer = setTimeout(() => sok(e.target.value), 300);
+  });
+
   document.addEventListener("change", async e => {
     const bryter = e.target.closest("[data-chatskriv],[data-kjfritt],[data-kjgodkjenn],[data-romfritt],[data-romgodkjenn]");
     if (!bryter) return;
@@ -5343,12 +6108,12 @@ const UI = (() => {
       }
     } catch {
       bryter.checked = !paa;
-      toast("Klarte ikke lagre. Har du kjørt siste SQL?");
+      toast("Klarte ikke lagre. Prøv igjen om litt.");
     }
   });
 
   document.addEventListener("click", async e => {
-    const t = e.target.closest("[data-tab],[data-side],[data-pakk],[data-slettpakk],[data-sete],[data-setevalg],[data-nykj],[data-endrekj],[data-slettkj],[data-vaerigjen],[data-svarbytte],[data-avgjorbytte],[data-trekkbytte],[data-nyttrom],[data-endrerom],[data-slettrom],[data-fyllrom],[data-fyllalle],[data-settrom],[data-romvalg],[data-utavrom],[data-bytterom],[data-svarrombytte],[data-avgjorrombytte],[data-trekkrombytte],[data-nykontakt],[data-endrekontakt],[data-slettkontakt],[data-nyttopprop],[data-hake],[data-lukkopprop],[data-omvis],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-iprog],[data-taned],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-msgmeny],[data-chat],[data-paa],[data-slettchat],[data-bilde],[data-slettbilde],[data-bvlukk],[data-bvmeny],[data-lagrebilde],[data-kopimeld],[data-deltekst],[data-chatside],[data-cmadd],[data-cmdel],[data-cmleave],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn,#skjulInstall,#installKnapp");
+    const t = e.target.closest("[data-tab],[data-side],[data-pakk],[data-slettpakk],[data-sete],[data-setevalg],[data-nykj],[data-endrekj],[data-slettkj],[data-vaerigjen],[data-svarbytte],[data-avgjorbytte],[data-trekkbytte],[data-nyttrom],[data-endrerom],[data-slettrom],[data-fyllrom],[data-fyllalle],[data-settrom],[data-romvalg],[data-utavrom],[data-bytterom],[data-svarrombytte],[data-avgjorrombytte],[data-trekkrombytte],[data-nykontakt],[data-endrekontakt],[data-slettkontakt],[data-nyttopprop],[data-hake],[data-lukkopprop],[data-omvis],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-iprog],[data-taned],[data-romliste],[data-angrerom],[data-fjernres],[data-rettnavn],[data-utsett],[data-startopprop],[data-seteliste],[data-fyllseter],[data-kalender],[data-aapnedok],[data-slettdok],[data-soktreff],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-msgmeny],[data-chat],[data-paa],[data-slettchat],[data-bilde],[data-slettbilde],[data-bvlukk],[data-bvmeny],[data-lagrebilde],[data-kopimeld],[data-deltekst],[data-chatside],[data-cmadd],[data-cmdel],[data-cmleave],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn,#skjulInstall,#installKnapp");
     if (!t) return;
 
     if (t.id === "joinTilbake") { S.fraStart = false; return visAuth("start"); }
@@ -5380,7 +6145,7 @@ const UI = (() => {
       const sporsmaal = gjest
         ? "Logge ut? Du er gjest, så kontoen finnes bare her — den slettes, og du kommer inn igjen med turkoden."
         : "Logge ut på denne enheten? Turene ligger igjen i basen, og du logger inn igjen med e-posten din.";
-      if (confirm(sporsmaal)) {
+      if (await bekreft(sporsmaal)) {
         // Vent: utloggingen rydder gjestekontoen, og det må rekke å skje
         // før siden lastes på nytt.
         await Api.signOutLocal();
@@ -5396,8 +6161,8 @@ const UI = (() => {
       const hva = Api.erAnonym()
         ? "Slette kontoen? Du er gjest, så alt du har her forsvinner, og turkoden må brukes på nytt."
         : "Slette kontoen? Du mistes fra alle turene dine, og e-posten din kan ikke logge inn igjen.";
-      if (!confirm(hva)) return;
-      if (!confirm("Helt sikker? Dette kan ikke angres.")) return;
+      if (!await bekreft(hva)) return;
+      if (!await bekreft("Helt sikker? Dette kan ikke angres.")) return;
 
       const svar = await Api.slettKonto();
 
@@ -5407,7 +6172,7 @@ const UI = (() => {
       // umulig å gjøre noe med.
       if (svar.grunn === "eier_tur") {
         const navn = (svar.turer || []).map(t2 => t2.name).join(", ");
-        alert("Kontoen ble ikke slettet. Du eier " +
+        await melding("Kontoen ble ikke slettet. Du eier " +
           ((svar.turer || []).length === 1 ? "turen " : "turene ") + navn +
           ". Slett dem, eller gjør noen andre til eier, og prøv igjen.");
         return;
@@ -5433,6 +6198,7 @@ const UI = (() => {
       if (t.dataset.side === "rom") return aapneRom();
       if (t.dataset.side === "kontakt") return aapneKontakt();
       if (t.dataset.side === "opprop") return aapneOpprop();
+      if (t.dataset.side === "dokumenter") return aapneDokumenter();
       return aapneSeter();
     }
 
@@ -5450,10 +6216,10 @@ const UI = (() => {
     }
 
     if (t.dataset.slettpakk) {
-      const egen = t.dataset.egen === "1";
-      if (!confirm(egen ? "Slette dette punktet?" : "Slette dette punktet for alle på turen?")) return;
-      try { await Api.slettPakkPunkt(t.dataset.slettpakk, egen); await aapnePakk(true); }
-      catch { toast("Klarte ikke slette punktet."); }
+      const egen = t.dataset.egen === "1", id = t.dataset.slettpakk;
+      const rad = t.closest(".pkrad");
+      medAngre("Punktet er slettet.", async () => { await Api.slettPakkPunkt(id, egen); await aapnePakk(true); },
+        skjult => { if (rad) rad.hidden = skjult; });
       return;
     }
 
@@ -5472,14 +6238,14 @@ const UI = (() => {
       try {
         if (mitt && mitt.nr === nr) {
           if (!k.fritt) return;                // du satte den ikke selv
-          if (!confirm(`Slippe ${navn} i ${k.navn}?`)) return;
+          if (!await bekreft(`Slippe ${navn} i ${k.navn}?`)) return;
           await Api.slippSete(k.id);
         } else if (k.fritt && !paa) {
           await Api.taSete(k.id, nr);
         } else {
           // Noen sitter der, eller reiselederen fordeler: da spør man.
           const hvem = paa ? paa.hvem : null;
-          if (!confirm(hvem
+          if (!await bekreft(hvem
             ? `Be ${hvem} om å bytte til ${navn} i ${k.navn}?`
             : `Be om ${navn} i ${k.navn}?`)) return;
           await Api.beOmBytte(k.id, nr);
@@ -5525,7 +6291,7 @@ const UI = (() => {
 
     if (t.dataset.slettrom) {
       const r = S.rom.rom.find(x => x.id === t.dataset.slettrom);
-      if (!confirm(`Slette ${r ? r.navn : "rommet"}? De som bor der blir stående uten seng.`)) return;
+      if (!await bekreft(`Slette ${r ? r.navn : "rommet"}? De som bor der blir stående uten seng.`)) return;
       try { await Api.slettRom(t.dataset.slettrom); closeSheet(); await aapneRom(true); }
       catch { toast("Klarte ikke slette rommet."); }
       return;
@@ -5547,7 +6313,7 @@ const UI = (() => {
 
     if (t.hasAttribute("data-fyllalle")) {
       const uten = (S.rom.alle || []).filter(p => !p.rom).length;
-      if (!confirm(`Legge de ${uten} uten seng i de ledige sengene? Ingen som alt har rom blir flyttet.`)) return;
+      if (!await bekreft(`Legge de ${uten} uten seng i de ledige sengene? Ingen som alt har rom blir flyttet.`)) return;
       try {
         const n = await Api.fyllRom(S.trip.id);
         await aapneRom(true);
@@ -5565,7 +6331,7 @@ const UI = (() => {
       const r = (S.rom.rom || []).find(x => x.id === t.dataset.bytterom);
       const person = t.dataset.person || null;
       const hvem = person && r ? (r.folk.find(p => p.id === person) || {}).navn : null;
-      if (!confirm(hvem
+      if (!await bekreft(hvem
         ? `Be ${hvem} om å bytte rom med deg?`
         : `Be om en ledig seng på ${r ? r.navn : "rommet"}?`)) return;
       try {
@@ -5607,15 +6373,17 @@ const UI = (() => {
 
     if (t.dataset.slettkontakt) {
       const c = ((S.kontakt || {}).liste || []).find(x => x.id === t.dataset.slettkontakt);
-      if (!confirm(`Slette ${c ? c.navn : "nummeret"}?`)) return;
+      if (!await bekreft(`Slette ${c ? c.navn : "nummeret"}?`)) return;
       try { await Api.slettKontakt(t.dataset.slettkontakt); await aapneKontakt(true); }
       catch (err) { toast(err.message); }
       return;
     }
 
     // ───── opprop ─────
-    if (t.hasAttribute("data-nyttopprop")) {
-      try { await Api.nyttOpprop(S.trip.id, ""); await aapneOpprop(true); }
+    if (t.hasAttribute("data-nyttopprop")) return sheetNyttOpprop();
+    if (t.dataset.startopprop !== undefined) {
+      closeSheet();
+      try { await Api.nyttOpprop(S.trip.id, "", t.dataset.startopprop || null); await aapneOpprop(true); }
       catch (err) { toast(err.message); }
       return;
     }
@@ -5637,7 +6405,7 @@ const UI = (() => {
 
     if (t.dataset.lukkopprop) {
       const mangler = (S.opprop.folk || []).filter(p => !p.her).length;
-      if (mangler && !confirm(`${mangler} står fortsatt uten hake. Avslutte oppropet likevel?`)) return;
+      if (mangler && !await bekreft(`${mangler} står fortsatt uten hake. Avslutte oppropet likevel?`)) return;
       try { await Api.lukkOpprop(t.dataset.lukkopprop); await aapneOpprop(true); }
       catch (err) { toast(err.message); }
       return;
@@ -5648,7 +6416,7 @@ const UI = (() => {
 
     if (t.dataset.slettkj) {
       const k = ((S.setekart || {}).kjoretoy || []).find(x => x.id === t.dataset.slettkj);
-      if (!confirm(`Slette ${k ? k.navn : "kjøretøyet"}? Plassene alle har valgt forsvinner.`)) return;
+      if (!await bekreft(`Slette ${k ? k.navn : "kjøretøyet"}? Plassene alle har valgt forsvinner.`)) return;
       try {
         await Api.slettKjoretoy(t.dataset.slettkj);
         closeSheet();
@@ -5687,6 +6455,53 @@ const UI = (() => {
       return openChat(t.dataset.openchat);
     }
 
+    if (t.dataset.romliste) return sheetRomliste();
+    if (t.dataset.kalender) return delKalender();
+    if (t.dataset.seteliste) return sheetSeteliste(t.dataset.seteliste, t.dataset.etter || "plass");
+    if (t.dataset.fyllseter) {
+      try {
+        const n = await Api.fyllSeter(t.dataset.fyllseter);
+        await aapneSeter(true); hentMegTall(true);
+        toast(n ? `${n} ${n === 1 ? "person" : "personer"} fikk plass.` : "Alle har alt plass, eller det er fullt.");
+      } catch (err) { toast(err.message || "Klarte ikke fylle plassene."); }
+      return;
+    }
+    if (t.dataset.aapnedok) {
+      // Vinduet åpnes i samme trykk; ellers stopper Safari det som en popup.
+      const vindu = erNativ() ? null : window.open("about:blank", "_blank");
+      try {
+        const url = await Api.dokumentAdresse(t.dataset.aapnedok);
+        if (vindu) vindu.location = url; else window.open(url, "_blank");
+      } catch (err) { if (vindu) vindu.close(); toast(err.message); }
+      return;
+    }
+    if (t.dataset.slettdok) {
+      if (!await bekreft(`Slette «${t.dataset.navn}»?`)) return;
+      try { await Api.slettDokument(t.dataset.slettdok, t.dataset.sti); await aapneDokumenter(true); }
+      catch (err) { toast(err.message || "Klarte ikke slette."); }
+      return;
+    }
+    if (t.dataset.soktreff) return hoppTilTreff(t.dataset.kanal, t.dataset.soktreff);
+    if (t.dataset.utsett) {
+      try {
+        const ny = await Api.utsettSletting(S.trip.id);
+        S.trip.slettes = ny;
+        closeSheet(); render();
+        toast("Turen slettes nå " + sletteTekst(ny).toLowerCase() + ".");
+      } catch (err) { toast(err.message || "Klarte ikke utsette."); }
+      return;
+    }
+    if (t.dataset.rettnavn) return sheetRettNavn(t.dataset.rettnavn, t.dataset.navn);
+    if (t.dataset.angrerom) {
+      try { await Api.angreRomplass(t.dataset.angrerom); await aapneRom(true); toast("Sengen er ledig igjen."); }
+      catch (err) { toast(err.message || "Klarte ikke angre."); }
+      return;
+    }
+    if (t.dataset.fjernres) {
+      try { await Api.fjernReservasjon(t.dataset.fjernres); await aapneRom(true); }
+      catch (err) { toast(err.message || "Klarte ikke fjerne navnet."); }
+      return;
+    }
     if (t.dataset.iprog) {
       const m = Api.messages(S.openChat).find(x => x.id === t.dataset.iprog);
       const a2 = m && m.action;
@@ -5703,33 +6518,32 @@ const UI = (() => {
       return;
     }
     if (t.dataset.delitem) {
-      if (!confirm("Slette dette punktet?")) return;
-      try { await Api.deleteItem(t.dataset.delitem); await openTrip(S.trip.id); }
-      catch { toast("Klarte ikke slette."); }
+      const id = t.dataset.delitem;
+      closeSheet();
+      const rad = $("screen").querySelector(`.ev[data-item="${CSS.escape(id)}"]`);
+      medAngre("Punktet er slettet.", async () => { await Api.deleteItem(id); await openTrip(S.trip.id); },
+        skjult => { if (rad) rad.hidden = skjult; });
       return;
     }
     if (t.dataset.delday) {
-      if (!confirm("Slette hele dagen med alle punktene?")) return;
+      if (!await bekreft("Slette hele dagen med alle punktene?")) return;
       try { await Api.deleteDay(t.dataset.delday); S.day = null; await openTrip(S.trip.id); }
       catch { toast("Klarte ikke slette."); }
       return;
     }
     if (t.dataset.delmsg) {
       const m = Api.messages(S.openChat).find(x => x.id === t.dataset.delmsg);
-      const harBilde = m && m.bilde;
-      if (!confirm(harBilde && !(m.txt)
-        ? "Slette bildet for alle? Det kan ikke angres."
-        : "Slette meldingen for alle? Det kan ikke angres.")) return;
-      try {
+      const harBilde = m && m.bilde, id = t.dataset.delmsg, kanal = S.openChat;
+      closeSheet();
+      lukkBilde();
+      const boks = $("screen").querySelector(`#msg-${CSS.escape(id)}`);
+      medAngre(harBilde && !(m.txt) ? "Bildet er slettet." : "Meldingen er slettet.", async () => {
         // Bildefila ligger for seg selv i lageret, og blir ikke med i
         // dragsuget når meldingen forsvinner. Den må ryddes først.
         if (harBilde) await Api.slettBilde(m.bilde).catch(() => {});
-        await Api.deleteMessage(t.dataset.delmsg, S.openChat);
-        closeSheet();
-        lukkBilde();
+        await Api.deleteMessage(id, kanal);
         render();
-      }
-      catch { toast("Klarte ikke slette meldingen."); }
+      }, skjult => { if (boks) boks.hidden = skjult; });
       return;
     }
     if (t.dataset.deltrip) return sheetSlettTur();
@@ -5747,7 +6561,7 @@ const UI = (() => {
         if (t.dataset.cmadd) await Api.addChannelMember(kanal, t.dataset.cmadd);
         else if (t.dataset.cmdel) await Api.removeChannelMember(kanal, t.dataset.cmdel);
         else {
-          if (!confirm("Gå ut av chatten? Du mister tilgangen til meldingene.")) return;
+          if (!await bekreft("Gå ut av chatten? Du mister tilgangen til meldingene.")) return;
           await Api.removeChannelMember(kanal, null);
           S.side = null; S.openChat = null;
           await openTrip(S.trip.id);
@@ -5763,7 +6577,7 @@ const UI = (() => {
       // Å fjerne noen er ikke til å angre på, så vi spør først. Meldingene
       // deres blir stående, men tilgangen forsvinner med én gang.
       if (t.dataset.fjern &&
-          !confirm(`Fjerne ${t.dataset.navn} fra turen? Da mister de tilgangen til program og chatter, og trenger turkoden på nytt for å komme inn igjen.`)) return;
+          !await bekreft(`Fjerne ${t.dataset.navn} fra turen? Da mister de tilgangen til program og chatter, og trenger turkoden på nytt for å komme inn igjen.`)) return;
       try {
         if (t.dataset.godkjenn) await Api.godkjennDeltaker(S.trip.id, t.dataset.godkjenn);
         else if (t.dataset.avvis) await Api.avvisDeltaker(S.trip.id, t.dataset.avvis);
@@ -5782,9 +6596,9 @@ const UI = (() => {
     if (t.dataset.bvmeny) return sheetEmoji(t.dataset.bvmeny, "bilde");
     if (t.dataset.lagrebilde) return lagreBilde(t.dataset.lagrebilde);
     if (t.dataset.deltekst) {
-      if (!confirm("Slette teksten for alle? Bildet blir stående.")) return;
+      if (!await bekreft("Slette teksten for alle? Bildet blir stående.")) return;
       try { await Api.slettTekst(t.dataset.deltekst, S.openChat); closeSheet(); render(); }
-      catch { toast("Klarte ikke slette teksten. Har du kjørt siste SQL?"); }
+      catch { toast("Klarte ikke slette teksten. Prøv igjen om litt."); }
       return;
     }
     if (t.dataset.kopimeld) {
@@ -5795,7 +6609,7 @@ const UI = (() => {
     }
 
     if (t.dataset.slettbilde) {
-      if (!confirm("Slette bildet for alle? Det kan ikke angres.")) return;
+      if (!await bekreft("Slette bildet for alle? Det kan ikke angres.")) return;
       try {
         await Api.slettBilde(t.dataset.slettbilde);
         closeSheet();
@@ -5809,7 +6623,7 @@ const UI = (() => {
 
     if (t.dataset.slettchat) {
       const c = S.trip.channels.find(x => x.id === t.dataset.slettchat);
-      if (!confirm(`Slette «${c ? c.name : "chatten"}» for alle? Meldingene forsvinner for godt.`)) return;
+      if (!await bekreft(`Slette «${c ? c.name : "chatten"}» for alle? Meldingene forsvinner for godt.`)) return;
       try {
         await Api.deleteChannel(t.dataset.slettchat);
         S.side = null; S.openChat = null;
@@ -5853,6 +6667,10 @@ const UI = (() => {
     }
     if (t.dataset.sheet === "place") return sheetPlace(t.dataset.place);
     if (t.dataset.sheet === "jointrip") return sheetJoinTrip();
+    if (t.dataset.sheet === "endrenavn") return sheetEndreNavn();
+    if (t.dataset.sheet === "paaroerende") return sheetPaaroerende();
+    if (t.dataset.sheet === "sletting") return sheetSletting();
+    if (t.dataset.sheet === "delkode") return sheetDelKode();
     if (t.dataset.sheet === "newtrip") return sheetNewTrip();
     if (t.dataset.sheet === "newchannel") return sheetNewChannel();
     if (t.dataset.sheet === "addday") return sheetAddDay();
@@ -5908,8 +6726,21 @@ const UI = (() => {
         toast(m.checked ? "Bilder er tillatt i chattene." : "Bilder er slått av for turen.");
       } catch {
         m.checked = !m.checked;
-        toast("Klarte ikke lagre. Har du kjørt siste SQL?");
+        toast("Klarte ikke lagre. Prøv igjen om litt.");
       }
+      return;
+    }
+
+    if (m.id === "paaroerendePaa") {
+      if (!m.checked && !await bekreft("Skru av? Alle pårørende-opplysningene som er samlet inn på turen, slettes.")) {
+        m.checked = true; return;
+      }
+      try {
+        await Api.settPaaroerende(S.trip.id, m.checked);
+        S.trip.paaroerende = m.checked;
+        await aapneDeltakere(true);
+        toast(m.checked ? "Deltakerne blir bedt om nærmeste pårørende." : "Skrudd av. Opplysningene er slettet.");
+      } catch (e) { m.checked = !m.checked; toast(e.message || "Klarte ikke lagre."); }
       return;
     }
 
@@ -5920,7 +6751,7 @@ const UI = (() => {
         toast(m.checked ? "Nye må nå godkjennes." : "Alle med koden slipper inn.");
       } catch {
         m.checked = !m.checked;
-        toast("Klarte ikke lagre. Har du kjørt siste SQL?");
+        toast("Klarte ikke lagre. Prøv igjen om litt.");
       }
       return;
     }
@@ -5956,9 +6787,10 @@ const UI = (() => {
 
   $("joinForm").addEventListener("submit", async e => {
     e.preventDefault();
-    const first = $("fFirst").value.trim(), last = $("fLast").value.trim();
+    const first = storForbokstav($("fFirst").value), last = storForbokstav($("fLast").value);
     const err = $("joinErr"), btn = $("joinSubmit");
-    if (!first || !last) { err.textContent = "Skriv både fornavn og etternavn."; err.hidden = false; return; }
+    const feil = navnFeil(first, last);
+    if (feil) { err.textContent = feil; err.hidden = false; return; }
     err.hidden = true; btn.disabled = true; btn.innerHTML = prikker() + " Blir med";
     try {
       Api.setProfile(first, last);

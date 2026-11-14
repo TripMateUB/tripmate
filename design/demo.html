@@ -51,6 +51,7 @@
     }
   } catch { /* uviktig */ }
 
+  await last("../vendor/qrcode.js");
   await last("../js/templates.js");
   await last("../js/parse.js");
   lagApi();
@@ -384,6 +385,17 @@ function lagApi() {
     // Utvidelse 29
     leggInnProgram: lover(0), giBortEierskap: lover(undefined), avlysProgramVarsel: lover(undefined),
     erSkjultForslag: () => false, skjulForslag: lover(undefined), merkIProgrammet: lover(undefined),
+    // Utvidelse 30
+    endreNavn: (f, l) => Promise.resolve({ first: f, last: l, name: f + " " + l, initials: (f[0] || "") + (l[0] || "") }),
+    rettNavn: lover(undefined), setSeterFritt: lover(undefined), settPaaroerende: lover(undefined),
+    minPaaroerende: lover(null), lagrePaaroerende: lover(undefined), slettPaaroerende: lover(undefined),
+    paaroerendeListe: lover(new Map()), lagreRomliste: lover({ plassert: 0, venter: 0 }),
+    mineRomforslag: lover([]), bekreftRomplass: lover("Rom 204"), avvisRomforslag: lover(undefined),
+    angreRomplass: lover(undefined), fjernReservasjon: lover(undefined),
+    utsettSletting: () => Promise.resolve("2027-01-30"),
+    // Utvidelse 31
+    fyllSeter: lover(2), dokumenter: lover([]), lastOppDokument: lover(undefined),
+    dokumentAdresse: lover("about:blank"), slettDokument: lover(undefined), sokMeldinger: lover([]),
     lastPaameldinger: ingen, paameldte: tom, meldPaa: lover(undefined), meldAv: lover(undefined),
 
     // ── varsler og konto ──

@@ -1,7 +1,7 @@
 {
   "name": "TripMate",
   "short_name": "TripMate",
-  "description": "Program, gruppechat og veibeskrivelse for klasseturen.",
+  "description": "Program, gruppechat og veibeskrivelse for gruppa som reiser.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

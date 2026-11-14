@@ -10,7 +10,7 @@
    endrer noe, så får alle den nye versjonen: nye filadresser går utenom
    både service workeren og nettleserens eget mellomlager. */
 
-const BUILD = 109;
+const BUILD = 110;
 const CACHE = "tripmate-b" + BUILD;
 const MAALCACHE = "tripmate-maal";   // chatten et varsel peker til
 
@@ -23,6 +23,7 @@ const SHELL = [
   "icons/icon-180.png",
   "styles.css?v=" + BUILD,
   "vendor/supabase.js?v=" + BUILD,
+  "vendor/qrcode.js?v=" + BUILD,
   "js/config.js?v=" + BUILD,
   "js/templates.js?v=" + BUILD,
   "js/api.js?v=" + BUILD,
