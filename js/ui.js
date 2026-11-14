@@ -21,7 +21,12 @@ const UI = (() => {
 
   const $ = id => document.getElementById(id);
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
-  const today = () => new Date().toISOString().slice(0, 10);
+  /* Datoen der telefonen er. toISOString() gir datoen i UTC, og da trodde
+     appen at det var i går mellom midnatt og kl 01–02 i Norge, og at det
+     var i morgen fra kl 19–20 om kvelden i New York. */
+  const lokalDato = (d = new Date()) => d.getFullYear() + "-" +
+    String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  const today = () => lokalDato();
   const clock = iso => new Date(iso).toLocaleTimeString("nb-NO", { hour:"2-digit", minute:"2-digit" });
 
   function shortStamp(iso) {
@@ -127,6 +132,42 @@ const UI = (() => {
     toast._t = setTimeout(() => { t.hidden = true; t.onclick = null; }, maal ? 6000 : 3000);
   }
 
+  /* Stripa som teller ned før deltakerne varsles om at dagens program er
+     endret. Varselet går av seg selv; vil reiselederen ikke sende det,
+     er det ett trykk. Nedtellingen her er bare til visning — den som
+     teller, er serveren. */
+  let stripeTimer = null;
+  function visProgramStripe({ tripId, sekunder }) {
+    let el = $("programstripe");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "programstripe"; el.className = "programstripe";
+      el.setAttribute("role", "status");
+      document.body.appendChild(el);
+    }
+    clearInterval(stripeTimer);
+    let igjen = sekunder;
+    const tegn = () => {
+      el.innerHTML = `<span>Deltakerne varsles om at dagens program er endret om <b>${igjen} s</b></span>
+        <button type="button" id="stoppVarsel">Ikke varsle</button>`;
+      $("stoppVarsel").onclick = async () => {
+        clearInterval(stripeTimer);
+        el.innerHTML = `<span>${prikker()} Stopper varselet</span>`;
+        try { await Api.avlysProgramVarsel(tripId); el.innerHTML = "<span>Deltakerne blir ikke varslet.</span>"; }
+        catch (e) { el.innerHTML = `<span>${esc(e.message)}</span>`; }
+        setTimeout(() => el.remove(), 2500);
+      };
+    };
+    tegn();
+    stripeTimer = setInterval(() => {
+      igjen -= 1;
+      if (igjen > 0) return tegn();
+      clearInterval(stripeTimer);
+      el.innerHTML = "<span>Varselet går ut til deltakerne nå.</span>";
+      setTimeout(() => el.remove(), 2500);
+    }, 1000);
+  }
+
   /* ───────────────── varsel → riktig chat ─────────────────
      Trykker du på et varsel, følger tur og chat med i adressen. Vi tar
      dem ut og fjerner dem igjen, så de ikke blir stående og styre hvor
@@ -226,6 +267,7 @@ const UI = (() => {
     // hentes fra Api, for endrer programmet seg er den vi holder utdatert.
     Api.onChange(hendelse => {
       if (!S.trip) return;
+      if (hendelse && hendelse.programVarsel) return visProgramStripe(hendelse.programVarsel);
       const fersk = Api.currentTrip();
       if (fersk && fersk.id === S.trip.id) S.trip = fersk;
       render();
@@ -468,7 +510,7 @@ const UI = (() => {
   function dagTopp(d) {
     const trip = S.trip;
     const dagnavn = d
-      ? cap(new Date(d.date).toLocaleDateString("nb-NO", { weekday: "long" }))
+      ? cap(new Date(d.date + "T12:00:00").toLocaleDateString("nb-NO", { weekday: "long" }))
       : "Turen";
     const nr = d ? trip.days.findIndex(x => x.date === d.date) + 1 : 0;
     const sted = d ? dagensSted(d) : null;
@@ -900,6 +942,7 @@ const UI = (() => {
           ${leader ? `<button class="linkbtn" style="font-size:11px" data-edit>${S.edit ? "Ferdig" : "Rediger"}</button>` : ""}
         </div>
         ${dagensVaer(d)}
+        ${S.edit ? `<p class="muted" style="margin:0 0 9px;font-size:13px">Punkter med klokkeslett står alltid etter tiden. Dra for å flytte punkter uten tid, eller punkter som starter samtidig.</p>` : ""}
         <div class="card pad"><div class="tl">${rows}</div></div>
       </div>
       ${leader ? `<div class="stack">
@@ -1035,10 +1078,21 @@ const UI = (() => {
     setTimeout(ferdig, ut === "lukker" ? 170 : 220);
   }
 
-  function actionCard(a, msgId) {
+  function actionCard(a, msgId, m) {
     const p = S.trip.places[a.place];
     if (!p) return "";
     const day = Parse.dayOf(S.trip, a.date);
+    // Skrev en reiseleder møtestedet, får de andre lederne tilbud om å
+    // legge det inn i programmet. Deltakerne ser bare veibeskrivelsen.
+    const leder = S.trip.role === "leader";
+    const fraLeder = m && m.role === "Reiseleder";
+    const iProgrammet = m && m.iProgrammet;
+    const tilbud = leder && fraLeder && !iProgrammet && day && !Api.erSkjultForslag(msgId)
+      ? `<div class="kartprogram">
+           <button class="btn" data-iprog="${esc(msgId)}">Legg i programmet</button>
+           <button class="linkbtn" data-taned="${esc(msgId)}">Ta ned</button>
+         </div>`
+      : leder && iProgrammet ? `<div class="kartprogram"><span class="tag moss">I programmet</span></div>` : "";
     if (!(msgId in S.kart)) { S.kart[msgId] = "vis"; kartNy.add(msgId + ":vis"); }
     const tilstand = S.kart[msgId];
     const ny = kartNy.delete(msgId + ":" + tilstand) ? " ny" : "";
@@ -1064,6 +1118,7 @@ const UI = (() => {
         <div class="acts">
         ${kartKnapp(p, "primary")}
         </div>
+        ${tilbud}
       </div>
     </div>`;
   }
@@ -1151,7 +1206,7 @@ const UI = (() => {
               ${esc(r.emoji)}<span>${r.navn.length}</span></button>`).join("")}
           </div>` : ""}
         <div class="stamp">${esc(dayStamp(m.ts))}</div>
-        ${m.action ? actionCard(m.action, m.id) : ""}
+        ${m.action ? actionCard(m.action, m.id, m) : ""}
       </div>`;
     }).join("");
 
@@ -2815,7 +2870,7 @@ const UI = (() => {
   function sheetAddDay() {
     const last = S.trip.days[S.trip.days.length - 1];
     let suggested = today();
-    if (last) { const d = new Date(last.date + "T12:00:00"); d.setDate(d.getDate() + 1); suggested = d.toISOString().slice(0, 10); }
+    if (last) { const d = new Date(last.date + "T12:00:00"); d.setDate(d.getDate() + 1); suggested = lokalDato(d); }
 
     openSheet(`<h3>Legg til dag</h3>
       <form id="addDayForm">
@@ -2847,21 +2902,24 @@ const UI = (() => {
       .map(p => `<option value="${esc(p.id)}" ${p.id === selected ? "selected" : ""}>${esc(p.name)}</option>`).join("");
   }
 
-  function sheetAddItem(dayId) {
+  /* «forh» fyller ut skjemaet på forhånd — fra et møtested i chatten:
+     { t, title, placeId, fraMelding }. */
+  function sheetAddItem(dayId, forh) {
     const day = S.trip.days.find(d => d.id === dayId);
+    const f = forh || {};
     openSheet(`<h3>Nytt programpunkt</h3>
       <p class="muted" style="margin:6px 0 14px">${esc(day ? day.label : "")}</p>
       <form id="addItemForm">
-        <div class="field"><label for="iTime">Klokkeslett</label><input id="iTime" type="time" value="09:00"></div>
+        <div class="field"><label for="iTime">Klokkeslett</label><input id="iTime" type="time" value="${esc(f.t != null ? f.t : "09:00")}"></div>
         <div class="field"><label for="iSlutt">Slutter</label><input id="iSlutt" type="time">
           <small style="display:block;margin-top:5px;font-size:12.5px;color:var(--ink-3)">
             Valgfritt. Overlapper to punkter i tid, merker appen dem som samtidige.</small></div>
-        <div class="field"><label for="iTitle">Hva skjer</label><input id="iTitle" placeholder="Omvisning Berlinmuren"></div>
+        <div class="field"><label for="iTitle">Hva skjer</label><input id="iTitle" placeholder="Omvisning Berlinmuren" value="${esc(f.title || "")}"></div>
         <div class="field">
           <label for="iPlace">Sted</label>
           <select id="iPlace" class="select">
             <option value="">Ingen / ikke stedfestet</option>
-            ${placeOptions(null)}
+            ${placeOptions(f.placeId || null)}
             <option value="__new">+ Nytt sted…</option>
           </select>
         </div>
@@ -2900,10 +2958,25 @@ const UI = (() => {
             name: pn, addr: $("pAddr").value.trim(), kind: $("pKind").value
           });
         }
-        await Api.addItem(S.trip.id, dayId, {
+        // Bakerst i heftets rekkefølge. Har punktet klokkeslett, finner det
+        // plassen sin etter tiden uansett; har det ikke det, havner det
+        // nederst på dagen i stedet for øverst.
+        // Uten tid følger et punkt punktet med tid som står foran det i
+        // heftet (se ordneDagen i api.js). Et nytt punkt uten tid skal stå
+        // nederst, så det legges rett bak det siste punktet med tid.
+        const punkter = day ? day.items : [];
+        const sisteMedTid = punkter.filter(i => i.t).slice(-1)[0];
+        const nesteSort = !$("iTime").value && sisteMedTid
+          ? (sisteMedTid.sort || 0) + 1
+          : punkter.reduce((m, i) => Math.max(m, i.sort || 0), 0) + 10;
+        const nyId = await Api.addItem(S.trip.id, dayId, {
           t: $("iTime").value, title, placeId, note: $("iNote").value.trim(),
-          minutter: minutterTil($("iTime").value, $("iSlutt").value)
+          minutter: minutterTil($("iTime").value, $("iSlutt").value),
+          sort: nesteSort
         });
+        // Kom punktet fra et møtested i chatten, får meldingen merket «I
+        // programmet», og forslaget forsvinner for de andre lederne.
+        if (f.fraMelding) await Api.merkIProgrammet(f.fraMelding, nyId).catch(() => {});
         closeSheet();
         await openTrip(S.trip.id);
       } catch (e2) {
@@ -2966,7 +3039,7 @@ const UI = (() => {
           <label for="pdfFiles">PDF-filer</label>
           <input id="pdfFiles" type="file" accept="application/pdf" multiple>
         </div>
-        <p class="muted" style="margin:-4px 0 14px">Maks 5 filer, 8 MB hver.</p>
+        <p class="muted" style="margin:-4px 0 14px">Maks 5 filer, 8 MB hver og 20 MB til sammen.</p>
         <p class="err" id="pdfErr" hidden></p>
         <button class="btn primary big" type="submit" id="pdfSubmit">Les filene</button>
       </form>
@@ -2977,6 +3050,21 @@ const UI = (() => {
       const input = $("pdfFiles"), err = $("pdfErr"), btn = $("pdfSubmit");
       const valgte = [...(input.files || [])];
       if (!valgte.length) { err.textContent = "Velg minst én fil."; err.hidden = false; return; }
+
+      // Grensene sjekkes her, før noe lastes opp. Før sendte appen alt
+      // og ventet på at serveren sa nei — på mobilnett etter lang tid.
+      // Til sammen 20 MB, fordi modellen tar imot 32 MB per forespørsel,
+      // og filene blir en tredel større på veien.
+      const MB = 1024 * 1024;
+      const stor = valgte.find(f => f.size > 8 * MB);
+      const ikkePdf = valgte.find(f => !/\.pdf$/i.test(f.name) && f.type !== "application/pdf");
+      const sum = valgte.reduce((n, f) => n + f.size, 0);
+      const stopp = valgte.length > 5 ? `Du valgte ${valgte.length} filer. Maks 5 om gangen.`
+        : ikkePdf ? `«${ikkePdf.name}» er ikke en PDF.`
+        : stor ? `«${stor.name}» er ${(stor.size / MB).toFixed(1).replace(".", ",")} MB. Maks 8 MB per fil.`
+        : sum > 20 * MB ? `Filene er ${(sum / MB).toFixed(1).replace(".", ",")} MB til sammen. Maks 20 MB. Les dem inn i to omganger.`
+        : null;
+      if (stopp) { err.textContent = stopp; err.hidden = false; return; }
 
       err.hidden = true;
       btn.disabled = true; btn.innerHTML = prikker() + " Leser filene";
@@ -3010,8 +3098,8 @@ const UI = (() => {
 
     if (!dager.length) {
       openSheet(`<h3>Fant ikke noe program</h3>
-        <p class="muted" style="margin:10px 0">Filen inneholdt ingen datoer.
-        Er det en skannet PDF som bare er bilder, klarer ikke appen å lese den.</p>
+        <p class="muted" style="margin:10px 0">Appen fant ingen datoer i filen. Står året
+        bare på forsiden, eller mangler datoene helt, kan du legge inn dagene selv.</p>
         ${advarsler.length ? `<div class="card pad" style="padding-block:12px"><div class="eyebrow">Merknader</div>
           <ul style="margin:8px 0 0;padding-left:18px;font-size:14px;color:var(--ink-2)">
             ${advarsler.map(a => `<li>${esc(a)}</li>`).join("")}</ul></div>` : ""}
@@ -3024,16 +3112,34 @@ const UI = (() => {
     const bolker = dager.map((d, i) => {
       const dag = Api.fmtDay(d.dato);
 
+      // Har dagen punkter fra før, skal ikke importen doble dem. Punkter
+      // med samme tittel og tid som noe som finnes, krysses av fra
+      // starten, og reiselederen velger hva som skjer med dagen.
+      const fraFor = (S.trip.days.find(x => x.date === d.dato) || {}).items || [];
+      const finnes = p => fraFor.some(x =>
+        x.title.trim().toLowerCase() === String(p.tittel || "").trim().toLowerCase() &&
+        (x.t || "") === (p.tid || ""));
+      const valgDag = fraFor.length ? `<div class="impdag">
+          <b>${fraFor.length} ${fraFor.length === 1 ? "punkt" : "punkter"} finnes alt denne dagen</b>
+          <div class="impdagvalg">
+            <label><input type="radio" name="modus-${i}" value="legg" checked> Legg til</label>
+            <label><input type="radio" name="modus-${i}" value="erstatt"> Erstatt</label>
+            <label><input type="radio" name="modus-${i}" value="hopp"> Hopp over</label>
+          </div>
+        </div>` : "";
+
       const punkter = (d.punkter || []).map((p, j) => {
         if (!p.tid) utenTid++;
         if (p.adresseForslag && !p.stedAdresse) foreslatt++;
+        const dobbel = finnes(p);
         return `<div class="imprad">
           <label class="impvelg">
-            <input type="checkbox" data-punkt="${i}-${j}" checked>
+            <input type="checkbox" data-punkt="${i}-${j}" ${dobbel ? "" : "checked"}>
             <span class="imptxt">
               ${p.tid ? `<b class="mono">${esc(p.tid)}</b> ` : ""}${esc(p.tittel)}
               ${p.stedNavn ? `<small>${esc(p.stedNavn)}${p.adresseForslag && !p.stedAdresse
                 ? ` · <b style="color:var(--amber)">adresse foreslått</b>` : ""}</small>` : ""}
+              ${dobbel ? `<small><b>Finnes alt i programmet</b></small>` : ""}
             </span>
           </label>
           ${p.tid ? "" : `<div class="imptid">
@@ -3067,6 +3173,7 @@ const UI = (() => {
 
       return `<div style="margin-bottom:20px">
         <div class="eyebrow" style="margin-bottom:7px">${esc(dag.label)}</div>
+        ${valgDag}
         ${hotell}
         <div class="memberlist">${punkter || '<p class="muted" style="padding:10px">Ingen punkter.</p>'}</div>
       </div>`;
@@ -3098,72 +3205,61 @@ const UI = (() => {
     $("impSubmit").addEventListener("click", () => leggInnForslag(dager));
   }
 
+  /* Alt legges inn i én operasjon i basen (legg_inn_program, Utvidelse
+     29). Før gikk det punkt for punkt: røk nettet midt i, lå halve
+     programmet inne, og et nytt forsøk doblet resten. Nå går det helt,
+     eller ikke i det hele tatt. */
   async function leggInnForslag(dager) {
     const btn = $("impSubmit"), err = $("impErr");
     const GENERISK = /^(hotellet|hotell|lobbyen|lobby|resepsjonen|rommet|bussen|egen hånd|ukjent)$/i;
+    const sted = (navn, adresse, url) => !navn || GENERISK.test(navn.trim()) ? null
+      : { navn: navn.trim(), adresse: adresse || "", url: url || "" };
+
+    const pakke = [];
+    dager.forEach((d, i) => {
+      const modusFelt = document.querySelector(`input[name="modus-${i}"]:checked`);
+      const modus = modusFelt ? modusFelt.value : "legg";
+      if (modus === "hopp") return;
+
+      const punkter = (d.punkter || [])
+        .map((p, j) => ({ p, j }))
+        .filter(({ j }) => { const b = document.querySelector(`[data-punkt="${i}-${j}"]`); return b && b.checked; })
+        .map(({ p, j }) => {
+          const tidFelt = document.querySelector(`[data-tid="${i}-${j}"]`);
+          const tid = p.tid || (tidFelt ? tidFelt.value : "");
+          return {
+            tid: /^\d{2}:\d{2}$/.test(tid) ? tid : "",
+            tittel: p.tittel || "Programpunkt",
+            notat: p.notat || "",
+            // Sto adressen i filen, vinner den. Ellers forslaget, som er
+            // merket i lista reiselederen nettopp godkjente.
+            sted: sted(p.stedNavn, p.stedAdresse || p.adresseForslag)
+          };
+        });
+
+      let hotell = null;
+      if (d.hotellNavn) {
+        const skrevet = document.querySelector(`[data-hoteladr="${i}"]`);
+        hotell = sted(d.hotellNavn, d.hotellAdresse || (skrevet ? skrevet.value.trim() : ""), d.hotellNettside);
+      }
+      if (!punkter.length && !hotell && modus !== "erstatt") return;
+      pakke.push({ dato: d.dato, modus, hotell, punkter });
+    });
+
+    if (!pakke.length) { err.textContent = "Ingenting er valgt."; err.hidden = false; return; }
+    if (pakke.some(d => d.modus === "erstatt") &&
+        !confirm("Erstatt sletter punktene som finnes på de dagene du har valgt det for. Fortsette?")) return;
 
     btn.disabled = true; btn.innerHTML = prikker() + " Legger inn";
     try {
-      const kjente = {};
-      for (const p of Object.values(S.trip.places)) kjente[p.name.toLowerCase()] = p.id;
-
-      const stedId = async (navn, adresse, type, url) => {
-        if (!navn || GENERISK.test(navn.trim())) return null;
-        const n = navn.toLowerCase();
-        if (kjente[n]) return kjente[n];
-        const id = await Api.addPlace(S.trip.id, {
-          name: navn, addr: adresse || "", kind: type || "Sted", url: url || ""
-        });
-        kjente[n] = id;
-        return id;
-      };
-
-      for (let i = 0; i < dager.length; i++) {
-        const d = dager[i];
-        const valgte = (d.punkter || [])
-          .map((p, j) => ({ p, j }))
-          .filter(({ j }) => {
-            const boks = document.querySelector(`[data-punkt="${i}-${j}"]`);
-            return boks && boks.checked;
-          });
-        if (!valgte.length && !d.hotellNavn) continue;
-
-        let dagId = (S.trip.days.find(x => x.date === d.dato) || {}).id;
-        if (!dagId) dagId = await Api.addDay(S.trip.id, d.dato);
-
-        if (d.hotellNavn) {
-          const skrevet = document.querySelector(`[data-hoteladr="${i}"]`);
-          const adr = d.hotellAdresse || (skrevet ? skrevet.value.trim() : "");
-          const hid = await stedId(d.hotellNavn, adr, "Hotell", d.hotellNettside);
-          if (hid) await Api.setHotel(dagId, hid);
-        }
-
-        // Rekkefølgen fra filen beholdes — den bærer mening når tiden mangler.
-        let n = 10;
-        for (const { p, j } of valgte) {
-          const tidFelt = document.querySelector(`[data-tid="${i}-${j}"]`);
-          const tid = p.tid || (tidFelt ? tidFelt.value : "");
-          // Sto adressen i filen, vinner den. Ellers tar vi forslaget —
-          // det er merket i lista du nettopp godkjente.
-          const sid = await stedId(p.stedNavn, p.stedAdresse || p.adresseForslag, "Sted");
-          await Api.addItem(S.trip.id, dagId, {
-            t: /^\d{2}:\d{2}$/.test(tid) ? tid : null,
-            title: p.tittel || "Programpunkt",
-            placeId: sid,
-            note: p.notat || "",
-            sort: n
-          });
-          n += 10;
-        }
-      }
-
+      const n = await Api.leggInnProgram(S.trip.id, pakke);
       forslag = null;
       closeSheet();
       await openTrip(S.trip.id);
-      toast("Programmet er lagt inn.");
+      toast(`${n} ${n === 1 ? "punkt" : "punkter"} er lagt inn.`);
     } catch (e) {
       btn.disabled = false; btn.textContent = "Legg inn i programmet";
-      err.textContent = e.message || "Klarte ikke legge inn alt.";
+      err.textContent = (e && e.message) || "Klarte ikke legge inn programmet. Ingenting ble lagt inn.";
       err.hidden = false;
     }
   }
@@ -4048,6 +4144,121 @@ const UI = (() => {
       <button class="btn close" data-close>Avbryt</button>`);
   }
 
+  /* ───────── melde seg av, og slette turen ─────────
+     Eieren kan ikke bare gå: da sto turen uten noen som kunne slette den.
+     Den siste lederen heller ikke. Basen stopper begge (Utvidelse 29), og
+     arkene her viser veien videre i stedet for en feilmelding. */
+  async function meldAv(tripId) {
+    await Api.leaveTrip(tripId);
+    S.trips = await Api.myTrips().catch(() => []);
+    if (S.trips.length) { S.tab = "program"; await openTrip(S.trips[0].id); }
+    else { Api.setLastTrip(null); showJoin(); }
+  }
+
+  function sheetMeldAv() {
+    const trip = S.trip;
+    if (!trip.erEier) {
+      openSheet(`<h3>Melde deg av ${esc(trip.name)}?</h3>
+        <p class="lede">Du mister programmet og chattene. Du kommer inn igjen med turkoden,
+          så sant reiselederen ikke har laget en ny kode eller krever godkjenning.</p>
+        <p class="err" id="maErr" hidden></p>
+        <button class="btn danger big" id="maJa">Meld meg av</button>
+        <button class="btn close" data-close>Avbryt</button>`);
+      $("maJa").addEventListener("click", async e => {
+        e.currentTarget.disabled = true;
+        try { closeSheet(); await meldAv(trip.id); }
+        catch (err) { openSheet(`<h3>Det gikk ikke</h3><p class="lede">${esc(err.message)}</p>
+          <button class="btn close" data-close>Lukk</button>`); }
+      });
+      return;
+    }
+
+    openSheet(`<h3>Du eier ${esc(trip.name)}</h3>${venter("Henter reiselederne")}
+      <button class="btn close" data-close>Avbryt</button>`);
+    Api.tripMembers(trip.id).then(folk => {
+      const ledere = folk.filter(p => p.role === "leader" && !p.me && !p.venter && !p.skjult);
+      const andre = folk.filter(p => p.role !== "leader" && !p.me && !p.venter && !p.skjult);
+      const rad = (p, tekst, data) => `<div class="person"><span>${esc(p.name)}</span>
+        <button class="linkbtn" ${data}="${esc(p.id)}">${tekst}</button></div>`;
+      openSheet(ledere.length
+        ? `<h3>Hvem tar over ${esc(trip.name)}?</h3>
+           <p class="lede">Du eier turen. Før du går, må en annen reiseleder bli eier. Hen kan da
+             styre turen, gi lederrollen videre og slette den.</p>
+           <div class="memberlist">${ledere.map(p => rad(p, "gi turen hit", "data-gibort")).join("")}</div>
+           <p class="err" id="maErr" hidden></p>
+           <button class="btn close" data-close>Avbryt</button>`
+        : `<h3>Du er den eneste reiselederen</h3>
+           <p class="lede">Turen må ha en reiseleder. Gjør en deltaker til reiseleder og gi turen
+             til hen, eller slett hele turen.</p>
+           ${andre.length ? `<div class="memberlist">${andre.map(p =>
+             rad(p, "gjør til leder og gi turen", "data-gibortny")).join("")}</div>`
+             : `<p class="muted">Ingen andre er med på turen ennå.</p>`}
+           <p class="err" id="maErr" hidden></p>
+           <button class="btn danger" style="width:100%;margin-top:12px" id="maSlett">Slett hele turen</button>
+           <button class="btn close" data-close>Avbryt</button>`);
+
+      const slett = $("maSlett");
+      if (slett) slett.addEventListener("click", () => sheetSlettTur());
+      for (const b of $("sheet").querySelectorAll("[data-gibort], [data-gibortny]")) {
+        b.addEventListener("click", async () => {
+          const id = b.dataset.gibort || b.dataset.gibortny;
+          const p = folk.find(x => x.id === id);
+          b.disabled = true; b.textContent = "Gir bort…";
+          try {
+            if (b.dataset.gibortny) await Api.setMemberRole(trip.id, id, "leader");
+            await Api.giBortEierskap(trip.id, id);
+            closeSheet();
+            await meldAv(trip.id);
+            toast(`${p ? p.name : "Den nye eieren"} eier turen nå. Du er meldt av.`);
+          } catch (err) {
+            b.disabled = false; b.textContent = "prøv igjen";
+            const e2 = $("maErr"); if (e2) { e2.textContent = err.message; e2.hidden = false; }
+          }
+        });
+      }
+    }).catch(() => openSheet(`<h3>Klarte ikke hente deltakerne</h3>
+      <p class="lede">Sjekk nettet og prøv igjen.</p><button class="btn close" data-close>Lukk</button>`));
+  }
+
+  /* Sletting av turen viser hva som forsvinner, og krever turens navn.
+     Før var det et nettleservindu som ba om turkoden. */
+  function sheetSlettTur() {
+    const trip = S.trip;
+    const rent = s => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
+    openSheet(`<h3>Slette ${esc(trip.name)}?</h3>
+      <p class="lede" id="stHva">Programmet med ${trip.days.length} ${trip.days.length === 1 ? "dag" : "dager"},
+        ${trip.channels.length} ${trip.channels.length === 1 ? "chat" : "chatter"} med alle meldingene,
+        rom, seter og pakkeliste forsvinner for alle. Det kan ikke angres.</p>
+      <div class="field"><label for="stNavn">Skriv navnet på turen for å bekrefte</label>
+        <input id="stNavn" autocomplete="off" placeholder="${esc(trip.name)}"></div>
+      <p class="err" id="stErr" hidden></p>
+      <button class="btn danger big" id="stJa" disabled>Slett turen for alle</button>
+      <button class="btn close" data-close>Avbryt</button>`);
+
+    Api.tripMembers(trip.id).then(folk => {
+      const n = folk.filter(p => !p.me && !p.skjult).length;
+      const hva = $("stHva");
+      if (hva && n) hva.insertAdjacentHTML("afterbegin", `<b>${n} ${n === 1 ? "deltaker" : "deltakere"}</b> mister turen. `);
+    }).catch(() => {});
+
+    $("stNavn").addEventListener("input", e => { $("stJa").disabled = rent(e.target.value) !== rent(trip.name); });
+    $("stJa").addEventListener("click", async e => {
+      const b = e.currentTarget;
+      b.disabled = true; b.innerHTML = prikker() + " Sletter";
+      try {
+        await Api.deleteTrip(trip.id);
+        closeSheet();
+        S.trips = await Api.myTrips().catch(() => []);
+        if (S.trips.length) { S.tab = "program"; await openTrip(S.trips[0].id); }
+        else { Api.setLastTrip(null); showJoin(); }
+        toast("Turen er slettet.");
+      } catch (err) {
+        b.disabled = false; b.textContent = "Slett turen for alle";
+        $("stErr").textContent = "Klarte ikke slette turen. " + (err.message || ""); $("stErr").hidden = false;
+      }
+    });
+  }
+
   /* ───────── omvisning ─────────
      En tur settes opp én gang, av en som aldri har gjort det før, og
      ofte kvelden før avreise. Den første omvisningen var fire sider
@@ -4602,7 +4813,7 @@ const UI = (() => {
      som avtaler et møtested. Hver chat kan settes for seg. */
   const NIVAER = [
     ["alt", "Alt", "Hver eneste melding"],
-    ["viktig", "Det viktige", "Reiseledere, svar til deg, og møtesteder"],
+    ["viktig", "Det viktige", "Reiseledere, svar til deg, og møtetider"],
     ["ingen", "Ingenting", "Ingen varsler herfra"]
   ];
 
@@ -5066,7 +5277,8 @@ const UI = (() => {
         <div class="person" style="align-items:flex-start">
           <span class="chattekst"><b>Det viktige</b>
             <small>Tre ting: meldinger fra reiseledere, svar på dine egne meldinger, og
-              meldinger som avtaler et møtested — som «møt på hotellet kl 18:30».
+              meldinger som avtaler et møtested med klokkeslett — som «møt på hotellet kl 18:30».
+              «Møt ved Notre-Dame» uten tid gir veibeskrivelse i chatten, men ikke varsel.
               Dette er utgangspunktet.</small></span>
         </div>
         <div class="person" style="align-items:flex-start">
@@ -5136,7 +5348,7 @@ const UI = (() => {
   });
 
   document.addEventListener("click", async e => {
-    const t = e.target.closest("[data-tab],[data-side],[data-pakk],[data-slettpakk],[data-sete],[data-setevalg],[data-nykj],[data-endrekj],[data-slettkj],[data-vaerigjen],[data-svarbytte],[data-avgjorbytte],[data-trekkbytte],[data-nyttrom],[data-endrerom],[data-slettrom],[data-fyllrom],[data-fyllalle],[data-settrom],[data-romvalg],[data-utavrom],[data-bytterom],[data-svarrombytte],[data-avgjorrombytte],[data-trekkrombytte],[data-nykontakt],[data-endrekontakt],[data-slettkontakt],[data-nyttopprop],[data-hake],[data-lukkopprop],[data-omvis],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-msgmeny],[data-chat],[data-paa],[data-slettchat],[data-bilde],[data-slettbilde],[data-bvlukk],[data-bvmeny],[data-lagrebilde],[data-kopimeld],[data-deltekst],[data-chatside],[data-cmadd],[data-cmdel],[data-cmleave],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn,#skjulInstall,#installKnapp");
+    const t = e.target.closest("[data-tab],[data-side],[data-pakk],[data-slettpakk],[data-sete],[data-setevalg],[data-nykj],[data-endrekj],[data-slettkj],[data-vaerigjen],[data-svarbytte],[data-avgjorbytte],[data-trekkbytte],[data-nyttrom],[data-endrerom],[data-slettrom],[data-fyllrom],[data-fyllalle],[data-settrom],[data-romvalg],[data-utavrom],[data-bytterom],[data-svarrombytte],[data-avgjorrombytte],[data-trekkrombytte],[data-nykontakt],[data-endrekontakt],[data-slettkontakt],[data-nyttopprop],[data-hake],[data-lukkopprop],[data-omvis],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-iprog],[data-taned],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-msgmeny],[data-chat],[data-paa],[data-slettchat],[data-bilde],[data-slettbilde],[data-bvlukk],[data-bvmeny],[data-lagrebilde],[data-kopimeld],[data-deltekst],[data-chatside],[data-cmadd],[data-cmdel],[data-cmleave],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn,#skjulInstall,#installKnapp");
     if (!t) return;
 
     if (t.id === "joinTilbake") { S.fraStart = false; return visAuth("start"); }
@@ -5475,6 +5687,21 @@ const UI = (() => {
       return openChat(t.dataset.openchat);
     }
 
+    if (t.dataset.iprog) {
+      const m = Api.messages(S.openChat).find(x => x.id === t.dataset.iprog);
+      const a2 = m && m.action;
+      const dag = a2 && S.trip.days.find(d => d.date === a2.date);
+      if (!dag) return toast("Den dagen finnes ikke i programmet.");
+      // Tittelen er meldingen, uten klokkeslettet som alt står i feltet over.
+      const tittel = String(m.txt || "").replace(/\b(kl\.?|klokka|klokken)?\s*\d{1,2}[.:]\d{2}\b/gi, "")
+        .replace(/\s{2,}/g, " ").trim().slice(0, 60);
+      return sheetAddItem(dag.id, { t: a2.time || "", title: tittel, placeId: a2.place, fraMelding: m.id });
+    }
+    if (t.dataset.taned) {
+      try { await Api.skjulForslag(t.dataset.taned); render(); }
+      catch { toast("Klarte ikke ta ned forslaget."); }
+      return;
+    }
     if (t.dataset.delitem) {
       if (!confirm("Slette dette punktet?")) return;
       try { await Api.deleteItem(t.dataset.delitem); await openTrip(S.trip.id); }
@@ -5505,29 +5732,8 @@ const UI = (() => {
       catch { toast("Klarte ikke slette meldingen."); }
       return;
     }
-    if (t.dataset.deltrip) {
-      const trip = S.trip;
-      if (!confirm(`Slette «${trip.name}» for alle? Program, chatter og meldinger forsvinner for godt.`)) return;
-      if (prompt("Skriv turkoden for å bekrefte:") !== trip.code) return toast("Koden stemte ikke. Ingenting er slettet.");
-      try {
-        await Api.deleteTrip(t.dataset.deltrip);
-        S.trips = await Api.myTrips().catch(() => []);
-        if (S.trips.length) { S.tab = "program"; await openTrip(S.trips[0].id); }
-        else { Api.setLastTrip(null); showJoin(); }
-        toast("Turen er slettet.");
-      } catch { toast("Klarte ikke slette turen."); }
-      return;
-    }
-    if (t.dataset.leave) {
-      if (!confirm("Melde deg av turen? Du kommer inn igjen med turkoden.")) return;
-      try {
-        await Api.leaveTrip(t.dataset.leave);
-        S.trips = await Api.myTrips().catch(() => []);
-        if (S.trips.length) { S.tab = "program"; await openTrip(S.trips[0].id); }
-        else { Api.setLastTrip(null); showJoin(); }
-      } catch { toast("Klarte ikke melde deg av."); }
-      return;
-    }
+    if (t.dataset.deltrip) return sheetSlettTur();
+    if (t.dataset.leave) return sheetMeldAv();
 
     // ark
     if (t.dataset.members) return aapneChatside(t.dataset.members);

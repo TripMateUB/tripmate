@@ -1290,3 +1290,27 @@ a.listrow:active{transform:none}
 .omvis-knapper .btn{flex:1}
 /* «Hopp over resten» skal kunne velges, men ikke konkurrere med Neste. */
 .omvis-hopp{display:block;margin:8px auto 0;font-size:13px;color:var(--ink-3)}
+
+/* Nedtelling før programvarsel. Ligger over fanelinja, og har sin egen
+   knapp: «Ikke varsle» må kunne treffes mens stripa står. */
+.programstripe{
+  position:fixed;left:12px;right:12px;bottom:calc(var(--safe-b) + 86px);z-index:60;
+  display:flex;align-items:center;gap:12px;padding:10px 10px 10px 14px;border-radius:14px;
+  background:var(--ink);color:#fff;font-size:13.5px;line-height:1.35;
+  box-shadow:0 10px 30px rgba(16,53,65,.25);max-width:560px;margin:0 auto;
+}
+.programstripe span{flex:1;min-width:0}
+.programstripe button{
+  flex:none;min-height:40px;padding:0 14px;border-radius:10px;border:0;
+  background:#fff;color:var(--ink);font:inherit;font-weight:600;cursor:pointer;
+}
+
+/* PDF-forslaget: dager som har punkter fra før. */
+.impdag{background:var(--amber-soft);border-radius:12px;padding:10px 12px;margin-bottom:10px;font-size:13.5px}
+.impdag b{color:var(--amber)}
+.impdagvalg{display:flex;gap:14px;flex-wrap:wrap;margin-top:6px}
+.impdagvalg label{display:flex;align-items:center;gap:6px;min-height:32px;cursor:pointer}
+
+/* «Legg i programmet» i kartkortet, bare for reiseledere. */
+.kartprogram{display:flex;align-items:center;gap:12px;margin-top:10px;flex-wrap:wrap}
+.kartprogram .btn{min-height:40px}

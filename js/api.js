@@ -60,6 +60,22 @@ const Api = (() => {
     if (d1.getMonth() === d2.getMonth()) return `${dag(d1)}.–${full(d2)}`;
     return `${full(d1)} – ${full(d2)}`;
   }
+  /* Datoen der telefonen er, ikke i UTC (se lokalDato i ui.js). */
+  function lokalIDag() {
+    const n = new Date();
+    return n.getFullYear() + "-" + String(n.getMonth() + 1).padStart(2, "0") + "-" + String(n.getDate()).padStart(2, "0");
+  }
+
+  /* Et nytt nummer for hvert programvarsel. crypto.randomUUID finnes ikke
+     i Safari før 15.4, og iOS-appen støtter 15.0. */
+  function nyId() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    const b = crypto.getRandomValues(new Uint8Array(16));
+    b[6] = (b[6] & 0x0f) | 0x40; b[8] = (b[8] & 0x3f) | 0x80;
+    const h = [...b].map(x => x.toString(16).padStart(2, "0")).join("");
+    return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+  }
+
   /* ───────── oppstart ───────── */
   async function init() {
     if (!CONFIG.ready) return { ok: false, reason: "mangler_config" };
@@ -176,6 +192,9 @@ const Api = (() => {
     if (m.includes("bare_ledere")) return k("Bare reiseledere kan skrive i denne chatten.");
     if (m.includes("privat_chat")) return k("En privat chat kan ikke være oppslagstavle.");
     if (m.includes("lederchat_styres")) return k("Lederchatten følger lederrollen. Gi lederrollen i stedet.");
+    if (m.includes("eier_maa_gi_bort")) return k("Du eier turen. Gi den til en annen reiseleder før du går.");
+    if (m.includes("ny_eier_maa_vaere_leder")) return k("Den nye eieren må være reiseleder.");
+    if (m.includes("ikke_eier")) return k("Bare den som eier turen kan gi den bort.");
     if (m.includes("ikke_fritt")) return k("Reiselederen fordeler plassene her.");
     if (m.includes("alt_din_plass")) return k("Det er plassen din.");
     if (m.includes("alt_spurt")) return k("Du har alt en forespørsel som venter her.");
@@ -258,17 +277,50 @@ const Api = (() => {
   }
 
 
-  /* Rekkefølgen i heftet bærer mening når klokkeslettet mangler, så «sort»
-     bestemmer. Faller den bort (gammel base), sorteres det på tid i stedet. */
-  function rekkefolge(a, b) {
-    const sa = a.sort, sb2 = b.sort;
-    if (sa != null && sb2 != null && sa !== sb2) return sa - sb2;
-    return (a.t || "99:99").localeCompare(b.t || "99:99");
+  /* Klokkeslettet bestemmer rekkefølgen. Før vant «sort», og da havnet et
+     punkt kl 21:00 øverst på en dag noen hadde dratt om på, og «Frokost
+     08:00» fra en PDF havnet etter «Middag 18:30» som lå der fra før.
+
+     «sort» er rekkefølgen i heftet, og den betyr noe for punktene uten
+     klokkeslett: «Fritid i Montmartre» står etter frokosten der heftet
+     satte det. Derfor følger hvert punkt uten tid punktet med tid som sto
+     rett foran det i heftet. Punktene med tid sorteres på klokkeslett,
+     og følget blir med. Står et punkt uten tid først, blir det stående
+     først. Samme klokkeslett: «sort». */
+  function ordneDagen(punkter) {
+    const s = p => (p.sort == null ? 0 : p.sort);
+    const etterSort = punkter.slice().sort((a, b) =>
+      s(a) - s(b) || String(a.t || "").localeCompare(String(b.t || "")));
+    const forst = [], grupper = [];
+    let gjeldende = null;
+    for (const p of etterSort) {
+      if (p.t) { gjeldende = { p, folge: [] }; grupper.push(gjeldende); }
+      else (gjeldende ? gjeldende.folge : forst).push(p);
+    }
+    grupper.sort((a, b) => String(a.p.t).localeCompare(String(b.p.t)) || s(a.p) - s(b.p));
+    return forst.concat(...grupper.map(g => [g.p, ...g.folge]));
   }
   function build(trip, member, places, days, items, channels) {
+    /* Kallenavnene er enkeltord fra stedsnavnet, så «Louvre» finner «Musée
+       du Louvre». Men vanlige ord ble også kallenavn: «paris» i «Paris
+       Charles de Gaulle», «terminal», «nord» i «Hôtel Lafayette Nord». Da
+       ble «Vi kommer til Paris kl 14» et kartkort til flyplassen. Nå må
+       ordet være minst fem tegn, ikke være et vanlig ord, og bare finnes
+       i ett av stedene på turen. */
+    const VANLIGE = new Set(["hotel", "hôtel", "hotell", "hotellet", "museum", "musée", "museet",
+      "terminal", "station", "stasjon", "stasjonen", "lufthavn", "airport", "flyplass", "sentrum",
+      "centre", "center", "centro", "city", "plass", "plassen", "gate", "gaten", "street", "parken",
+      "slottet", "kirke", "kirken", "restaurant", "kafé", "grand", "royal", "central", "sentral",
+      "paris", "london", "berlin", "oslo", "roma", "praha", "nord", "north", "south", "east", "west",
+      "gamle", "store", "lille", "saint", "sankt"]);
+    const ordAv = navn => String(navn).toLowerCase().split(/[\s,()/–-]+/)
+      .filter(w => w.length >= 5 && !VANLIGE.has(w));
+    const hvorMange = {};
+    for (const p of places) for (const w of new Set(ordAv(p.name))) hvorMange[w] = (hvorMange[w] || 0) + 1;
+
     const placeMap = {};
     for (const p of places) {
-      const words = p.name.toLowerCase().split(/[\s,()]+/).filter(w => w.length > 3);
+      const words = ordAv(p.name).filter(w => hvorMange[w] === 1);
       placeMap[p.id] = {
         id: p.id, name: p.name, addr: p.addr, kind: p.kind, url: p.url || "",
         lat: p.lat == null ? null : p.lat, lon: p.lon == null ? null : p.lon,
@@ -299,7 +351,7 @@ const Api = (() => {
       places: placeMap,
       days: days.map(d => Object.assign({
         id: d.id, date: d.date, hotel: d.hotel_place_id, ignorerHotell: d.ignore_hotel === true,
-        items: (byDay[d.id] || []).sort(rekkefolge).map(i => ({
+        items: ordneDagen(byDay[d.id] || []).map(i => ({
           id: i.id, t: i.t || "", title: i.title, place: i.place_id, note: i.note, src: i.src,
           paamelding: i.paamelding === true, plasser: i.plasser == null ? null : i.plasser,
           minutter: i.minutter == null ? null : i.minutter,
@@ -399,7 +451,8 @@ const Api = (() => {
     const [m, r] = await Promise.all([
       sb.from("messages").select("*").eq("channel_id", channelId)
         .order("created_at", { ascending: false }).limit(SIDE),
-      sb.from("reactions").select("*").eq("channel_id", channelId)
+      sb.from("reactions").select("*").eq("channel_id", channelId),
+      isLeader() ? lastSkjulteForslag() : null
     ]);
     if (m.error) throw m.error;
     cache.messages[channelId] = (m.data || []).reverse().map(shape);
@@ -431,8 +484,37 @@ const Api = (() => {
   const shape = m => ({
     id: m.id, who: m.author_name, role: m.role, txt: m.txt,
     ts: m.created_at, action: m.action || null, mine: m.author_id === userId,
-    replyTo: m.reply_to || null, bilde: m.bilde || null
+    replyTo: m.reply_to || null, bilde: m.bilde || null,
+    // Utvidelse 29: meldingen er lagt inn i programmet (punktets id).
+    iProgrammet: m.i_programmet || null
   });
+
+  /* «Legg i programmet» på møtesteder en reiseleder har skrevet. Er det
+     lagt inn, forsvinner forslaget for alle lederne (merket ligger på
+     meldingen). Tar en leder det ned, forsvinner det bare for hen, og det
+     huskes på kontoen. */
+  const skjulteForslag = new Set();
+  async function lastSkjulteForslag() {
+    if (!online()) return;
+    const { data, error } = await sb.from("skjulte_forslag").select("message_id");
+    if (error) return;                        // basen har ikke Utvidelse 29 ennå
+    skjulteForslag.clear();
+    for (const r of data || []) skjulteForslag.add(r.message_id);
+  }
+  const erSkjultForslag = id => skjulteForslag.has(id);
+  async function skjulForslag(messageId) {
+    skjulteForslag.add(messageId);
+    const { error } = await sb.from("skjulte_forslag").insert({ message_id: messageId });
+    if (error && !/duplicate/i.test(error.message || "")) { skjulteForslag.delete(messageId); throw friendly(error); }
+  }
+  async function merkIProgrammet(messageId, itemId) {
+    const { error } = await sb.rpc("merk_i_programmet", { p_melding: messageId, p_punkt: itemId });
+    if (error) throw friendly(error);
+    for (const liste of Object.values(cache.messages)) {
+      const m = liste.find(x => x.id === messageId);
+      if (m) m.iProgrammet = itemId;
+    }
+  }
 
   /* ───────── reaksjoner ───────── */
   /* Samlet per melding: hvilken emoji, hvor mange, hvem — og om du selv
@@ -735,28 +817,47 @@ const Api = (() => {
     sb.from("tilstede").delete().eq("user_id", userId).then(() => {}, () => {});
   }
 
-  /* Endrer reiselederen programmet for i dag, skal folk få vite det.
-     Serveren avgjør om datoen er i dag — den har riktig klokke. */
+  /* Endrer reiselederen programmet for i dag, skal folk få vite det —
+     men først etter 20 sekunder, og bare hvis reiselederen ikke trykker
+     «Ikke varsle». Nedtellingen går på serveren (varsle, Utvidelse 29),
+     så varselet går ut selv om telefonen låses. Hver ny endring starter
+     den på nytt med et nytt nummer, og bare det siste nummeret sendes.
+     Endringer for andre dager varsles ikke i det hele tatt. */
   let programVarselTimer = null;
+  const VARSEL_SEKUNDER = 20;
+
+  async function kallVarsle(kropp) {
+    const { data } = await sb.auth.getSession();
+    if (!data.session) return null;
+    const res = await fetch(CONFIG.supabaseUrl + "/functions/v1/varsle", {
+      method: "POST", keepalive: true,
+      headers: {
+        "Authorization": "Bearer " + data.session.access_token,
+        "apikey": CONFIG.supabaseAnonKey,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(kropp)
+    });
+    return res.json().catch(() => null);
+  }
+
   function varsleOmProgram(tripId, dato) {
-    if (!dato) return;
+    if (!dato || dato !== lokalIDag()) return;
     clearTimeout(programVarselTimer);
-    // Drar man om på fem punkter, er det én endring, ikke fem varsler.
+    // En omsortering lagrer hvert punkt for seg. Det er én endring, ikke
+    // ti, så kallene samles først i halvannet sekund.
     programVarselTimer = setTimeout(async () => {
-      try {
-        const { data } = await sb.auth.getSession();
-        if (!data.session) return;
-        await fetch(CONFIG.supabaseUrl + "/functions/v1/varsle", {
-          method: "POST", keepalive: true,
-          headers: {
-            "Authorization": "Bearer " + data.session.access_token,
-            "apikey": CONFIG.supabaseAnonKey,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({ program: { tripId, dato } })
-        });
-      } catch { /* programmet er endret uansett */ }
-    }, 12000);
+      fire({ programVarsel: { tripId, sekunder: VARSEL_SEKUNDER } });
+      try { await kallVarsle({ program: { tripId, dato, nr: nyId() } }); }
+      catch { /* programmet er endret uansett */ }
+    }, 1500);
+  }
+
+  /* «Ikke varsle»: serveren sletter det ventende varselet. */
+  async function avlysProgramVarsel(tripId) {
+    clearTimeout(programVarselTimer);
+    const svar = await kallVarsle({ avlys: { tripId } });
+    if (!svar || svar.feil) throw new Error((svar && svar.feil) || "Fikk ikke stoppet varselet.");
   }
 
   const kanVarsle = () =>
@@ -1882,9 +1983,18 @@ const Api = (() => {
   }
 
   async function leaveTrip(tripId) {
+    // Basen stopper eieren og den siste lederen (Utvidelse 29). Da kommer
+    // feilen hit, og friendly() gjør den om til noe som kan leses.
     const { error } = await sb.from("members").delete().eq("trip_id", tripId).eq("user_id", userId);
-    if (error) throw error;
+    if (error) throw friendly(error);
     try { localStorage.removeItem(LS.snapshot(tripId)); } catch {}
+  }
+
+  /* Eieren gir turen til en annen reiseleder, så hen kan gå. */
+  async function giBortEierskap(tripId, nyEier) {
+    const { error } = await sb.rpc("gi_bort_eierskap", { p_trip: tripId, p_ny: nyEier });
+    if (error) throw friendly(error);
+    if (cache.trip && cache.trip.id === tripId) cache.trip.erEier = false;
   }
 
   /* ───────── fyll en tur fra en mal ───────── */
@@ -1908,6 +2018,19 @@ const Api = (() => {
     for (const c of (tpl.channels || [])) {
       await addChannel(tripId, c.name, c.sub, false, []);
     }
+  }
+
+  /* Hele det godkjente forslaget i én operasjon (Utvidelse 29). Enten
+     kommer alt inn, eller ingenting — aldri et halvt program. */
+  async function leggInnProgram(tripId, dager) {
+    const { data, error } = await sb.rpc("legg_inn_program", { p_trip: tripId, p_dager: dager });
+    if (error) throw Object.assign(friendly(error), {
+      message: "Klarte ikke legge inn programmet, og ingenting ble lagt inn. " + (friendly(error).message || "")
+    });
+    cache.vaerUtdatert = true;                    // nye steder trenger værmelding
+    const idag = lokalIDag();
+    if (dager.some(d => d.dato === idag)) varsleOmProgram(tripId, idag);
+    return data || 0;
   }
 
   /* ───────── les program fra PDF ───────── */
@@ -2195,7 +2318,7 @@ const Api = (() => {
   return {
     init, online, fmtDay,
     getProfile, setProfile, getLastTrip, setLastTrip, getLastChannel, setLastChannel,
-    myTrips, joinByCode, createTrip, updateTrip, doppChat, flyttTur, antallVentende, glemTur,
+    myTrips, joinByCode, createTrip, updateTrip, doppChat, flyttTur, antallVentende, glemTur, giBortEierskap,
     kartValg, settKartValg, reisemaate, settReisemaate, loadTrip, lagretTur: loadSnapshot, currentTrip, isLeader, leaveTrip, deleteTrip,
     messages, loadMessages, loadMoreMessages, harEldre, loadRecent, lastByChannel,
     settLest, erUlest, antallUleste,
@@ -2214,8 +2337,9 @@ const Api = (() => {
     settRomvalg, beOmRombytte, svarRombytte, avgjorRombytte, trekkRombytte, fyllRom,
     kontakter, nyKontakt, endreKontakt, slettKontakt,
     opprop, nyttOpprop, settHake, lukkOpprop, byttTurkode,
-    applyTemplate, lesProgramFraPdf, signOutLocal,
-    varselStatus, slaaPaaVarsler, slaaAvVarsler, varselEnheter, testVarsel, varmVarsler,
+    applyTemplate, lesProgramFraPdf, leggInnProgram, signOutLocal,
+    erSkjultForslag, skjulForslag, merkIProgrammet,
+    varselStatus, slaaPaaVarsler, slaaAvVarsler, avlysProgramVarsel, varselEnheter, testVarsel, varmVarsler,
     erHer, ikkeHer,
     lastVarselvalg, varselvalg, varselNiva, settVarselNiva,
     lesInnlogging, erAnonym, minEpost, sendKode, bekreftKode, koblePaaEpost, bekreftKobling,

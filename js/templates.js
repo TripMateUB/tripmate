@@ -149,7 +149,8 @@ function templateDates(tpl) {
   const dates = tpl.days.map(d => {
     const x = new Date(start);
     x.setDate(start.getDate() + d.offset);
-    return x.toISOString().slice(0, 10);
+    return x.getFullYear() + "-" + String(x.getMonth() + 1).padStart(2, "0") + "-" +
+      String(x.getDate()).padStart(2, "0");
   });
   const f = s => new Date(s + "T12:00:00").toLocaleDateString("nb-NO", { day:"numeric", month:"long" });
   return { dates, label: `${f(dates[0])}–${f(dates[dates.length - 1])}` };

@@ -362,7 +362,7 @@ function lagApi() {
 
     // ── folk og kanaler ──
     tripMembers: lover([
-      { id: "meg", name: "Jonas Robstad", role: "leader", status: "ok" },
+      { id: "meg", name: "Jonas Robstad", role: "leader", status: "ok", me: true },
       { id: "u2", name: "Emma Nygård", role: "member", status: "ok" },
       { id: "u3", name: "Mathias Lund", role: "member", status: "ok" }
     ]),
@@ -381,6 +381,9 @@ function lagApi() {
     updateTrip: lover(undefined), flyttTur: lover(undefined), createTrip: lover(TUR),
     joinByCode: lover(TUR), leaveTrip: lover(undefined), deleteTrip: lover(undefined),
     applyTemplate: lover(TUR), lesProgramFraPdf: lover([]),
+    // Utvidelse 29
+    leggInnProgram: lover(0), giBortEierskap: lover(undefined), avlysProgramVarsel: lover(undefined),
+    erSkjultForslag: () => false, skjulForslag: lover(undefined), merkIProgrammet: lover(undefined),
     lastPaameldinger: ingen, paameldte: tom, meldPaa: lover(undefined), meldAv: lover(undefined),
 
     // ── varsler og konto ──

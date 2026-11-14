@@ -12,11 +12,25 @@ const Parse = (() => {
 
   const WEEKDAYS = ["søndag","mandag","tirsdag","onsdag","torsdag","fredag","lørdag"];
 
+  /* Hele ord, også med æ, ø og å. JavaScripts \b kjenner bare a–z, så
+     «\bgå\b» traff inne i «går», og «møt» kunne treffe midt i ord.
+     Ingen lookbehind: den finnes ikke i Safari 15, og iOS-appen støtter
+     iOS 15. Derfor en gruppe foran i stedet. */
+  const ord = liste => new RegExp("(?:^|[^\\p{L}\\p{N}])(?:" + liste.join("|") + ")(?=$|[^\\p{L}\\p{N}])", "u");
+
+  const MOTEORD = ord(["møt", "møtes", "møter", "treffes", "samles", "samling", "oppmøte",
+                       "vi ses", "sees", "ses", "avreise", "avgang", "drar", "går fra"]);
+  const HOTELLORD = ord(["hotell", "hotellet", "lobby", "lobbyen", "resepsjonen", "rommet"]);
+  const FORTID = ord(["i går", "igår", "i forgårs"]);
+
   /* Hvilken dag tar vi utgangspunkt i: dagens dato hvis turen pågår,
      ellers første dag i programmet. */
   function baseDate(trip) {
     if (!trip || !trip.days || !trip.days.length) return null;
-    const today = new Date().toISOString().slice(0, 10);
+    // Lokal dato, ikke UTC — se lokalDato() i ui.js.
+    const n = new Date();
+    const today = n.getFullYear() + "-" + String(n.getMonth() + 1).padStart(2, "0") + "-" +
+      String(n.getDate()).padStart(2, "0");
     const hit = trip.days.find(d => d.date === today);
     if (hit) return hit.date;
     const future = trip.days.find(d => d.date > today);
@@ -55,14 +69,14 @@ const Parse = (() => {
   }
 
   function findPlace(trip, low, date) {
-    const hotelWords = /\b(hotell|hotellet|lobby|lobbyen|resepsjonen|rommet)\b/;
     const day = dayOf(trip, date);
 
     // Navngitt sted vinner over «hotellet», bortsett fra når hotellet er navngitt.
+    // Kallenavnene må stå som hele ord: «nord» skal ikke treffe «nordover».
     let best = null;
     for (const [id, p] of Object.entries(trip.places)) {
       const hitName = low.includes(p.name.toLowerCase());
-      const hitAlias = (p.alias || []).some(a => low.includes(a));
+      const hitAlias = (p.alias || []).some(a => a && ord([a.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")]).test(low));
       if (!hitName && !hitAlias) continue;
       const isHotel = p.kind === "Hotell";
       if (!isHotel) { best = id; break; }
@@ -71,7 +85,7 @@ const Parse = (() => {
     if (best && trip.places[best].kind !== "Hotell") {
       return { place: best, why: `Stedsnavnet «${trip.places[best].name}»` };
     }
-    if (best || hotelWords.test(low)) {
+    if (best || HOTELLORD.test(low)) {
       if (day && day.hotel && trip.places[day.hotel]) {
         return { place: day.hotel, why: "«hotellet» tolket som hotellet dere bor på" };
       }
@@ -92,20 +106,26 @@ const Parse = (() => {
     const base = baseDate(trip);
     if (!base) return null;               // turen har ikke program ennå
     const low = " " + String(text).toLowerCase() + " ";
-    const time = findTime(low);
+
+    /* En avtale har et ord som sier at folk skal møtes. Før holdt det med
+       et klokkeslett, og da ble «blir på rommet kl 19» (syk) og «jeg
+       kommer 15:00 da» til kartkort. Noe som skjedde i går er heller ingen
+       avtale.
+
+       Klokkeslettet er ikke et krav for kortet: «Møt ved Notre-Dame» skal
+       gi veibeskrivelse. Men bare kort MED klokkeslett varsles til alle på
+       «Det viktige» — det sjekker serverfunksjonen varsle. */
+    if (FORTID.test(low) || !MOTEORD.test(low)) return null;
+    const time = findTime(low) || "";
     const date = findDate(trip, low, base);
 
     const hit = findPlace(trip, low, date) || fromProgram(trip, date, time);
     if (!hit) return null;
 
-    // Uten klokkeslett OG uten møteord er det sannsynligvis bare prat.
-    const meetWord = /\b(møt|møtes|treffes|samles|oppmøte|vi ses|sees|avreise|dra|gå)\b/.test(low);
-    if (!time && !meetWord) return null;
-
     const day = dayOf(trip, date);
     return {
       place: hit.place,
-      time: time || "",
+      time,
       date,
       why: hit.why + (day ? ` · ${day.label}` : "")
     };
