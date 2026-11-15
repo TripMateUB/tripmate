@@ -129,8 +129,13 @@
     if (flyttet > 10) return;
     if (e.target.closest && e.target.closest("input, textarea, select, button, a, label, [contenteditable], [role=button]")) return;
     const a = document.activeElement;
-    if (a && erSkrivefelt(a)) a.blur();
-  }, { passive: true, capture: true });
+    if (!a || !erSkrivefelt(a)) return;
+    // Uten dette kom klikket etter at tastaturet hadde lagt seg og arket
+    // hadde flyttet seg ned, og da traff det den mørke bakgrunnen bak
+    // arket og lukket hele arket. Trykket skal bare legge bort tastaturet.
+    if (e.cancelable) e.preventDefault();
+    a.blur();
+  }, { passive: false, capture: true });
 
   /* ── Dra ned for å legge bort tastaturet ──
      Slik Meldinger gjør: drar du nedover i lista eller arket mens du

@@ -1979,7 +1979,7 @@ const UI = (() => {
           <button class="listrow" data-sheet="koblepost">
             <span class="rikon">${ICON.post}</span>
             <div class="grow"><div class="nm">${Api.erAnonym() ? "Sikre kontoen" : "E-postadresse"}</div></div>
-            <span class="verdi">${Api.erAnonym() ? "Bare i denne nettleseren" : esc(Api.minEpost() || "Innlogget")}</span>
+            <span class="verdi">${Api.erAnonym() ? (erNativ() ? "Bare på denne telefonen" : "Bare i denne nettleseren") : esc(Api.minEpost() || "Innlogget")}</span>
             <span class="chev">${ICON.chev}</span></button>
           <button class="listrow" data-sheet="kartvalg">
             <span class="rikon mose">${ICON.kart}</span>
@@ -1992,8 +1992,9 @@ const UI = (() => {
             <div class="grow"><div class="nm">Om appen og personvern</div></div>
             <span class="chev">${ICON.chev}</span></button>
         </div></div>
-        ${Api.erAnonym() ? `<p class="muted" style="margin-top:7px">Bytter du telefon eller tømmer
-          nettleserdata mens du er gjest, er turene borte.</p>` : ""}
+        ${Api.erAnonym() ? `<p class="muted" style="margin-top:7px">${erNativ()
+          ? "Bytter du telefon eller sletter appen mens du er gjest, er turene borte."
+          : "Bytter du telefon eller tømmer nettleserdata mens du er gjest, er turene borte."}</p>` : ""}
 
         <div class="gruppe" style="margin-top:14px"><div class="list">
           <button class="listrow bar fare" data-leave="${esc(trip.id)}">Meld deg av ${esc(trip.name)}</button>
@@ -4889,7 +4890,7 @@ const UI = (() => {
     const gjest = Api.erAnonym();
     openSheet(`<h3>Slette kontoen?</h3>
       <p class="lede">${gjest
-        ? "Du er gjest, så kontoen finnes bare i denne nettleseren. Alt du har her forsvinner, og du må bruke turkoden på nytt for å komme inn igjen."
+        ? `Du er gjest, så kontoen finnes bare ${erNativ() ? "på denne telefonen" : "i denne nettleseren"}. Alt du har her forsvinner, og du må bruke turkoden på nytt for å komme inn igjen.`
         : "Du mistes fra alle turene dine, og e-posten din kan ikke logge inn igjen. Eier du en tur, må den slettes eller gis bort først."}</p>
       <p class="muted" style="margin:0 0 16px">Dette kan ikke angres. Vil du bare bort fra
         denne telefonen, er «Logg ut på denne enheten» det du leter etter.</p>
