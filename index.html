@@ -19,7 +19,7 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap">
 <noscript><link rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap"></noscript>
-<link rel="stylesheet" href="styles.css?v=110">
+<link rel="stylesheet" href="styles.css?v=113">
 </head>
 <body>
 
@@ -99,11 +99,11 @@
     <form id="joinForm" novalidate>
       <div class="field">
         <label for="fFirst">Fornavn</label>
-        <input id="fFirst" name="first" autocomplete="given-name" required>
+        <input id="fFirst" autocapitalize="words" autocorrect="off" spellcheck="false" name="first" autocomplete="given-name" required>
       </div>
       <div class="field">
         <label for="fLast">Etternavn</label>
-        <input id="fLast" name="last" autocomplete="family-name" required>
+        <input id="fLast" autocapitalize="words" autocorrect="off" spellcheck="false" name="last" autocomplete="family-name" required>
       </div>
       <div class="field">
         <label for="fCode">Turkode</label>
@@ -169,13 +169,14 @@
 
 <div class="toast" id="toast" hidden></div>
 
-<script src="js/config.js?v=110"></script>
-<script src="vendor/supabase.js?v=110"></script>
-<script src="vendor/qrcode.js?v=110"></script>
-<script src="js/templates.js?v=110"></script>
-<script src="js/api.js?v=110"></script>
-<script src="js/parse.js?v=110"></script>
-<script src="js/ui.js?v=110"></script>
+<script src="js/config.js?v=113"></script>
+<script src="vendor/supabase.js?v=113"></script>
+<script src="vendor/qrcode.js?v=113"></script>
+<script src="js/templates.js?v=113"></script>
+<script src="js/api.js?v=113"></script>
+<script src="js/parse.js?v=113"></script>
+<script src="js/ui.js?v=113"></script>
+<script src="js/native.js?v=113"></script>
 <script>
 
 // Safari regner 100dvh litt feil, og da blir appen kortere enn skjermen —
@@ -185,10 +186,22 @@
   let sist = 0;
   let tastatur = false;
 
+  // I iOS-appen krymper iOS selve vinduet når tastaturet kommer opp, og
+  // js/native.js setter tastatur-klassen. Da er innerHeight alltid riktig,
+  // og ingenting av gjettingen under trengs.
+  const nativ = Boolean(window.Capacitor && window.Capacitor.isNativePlatform &&
+                        window.Capacitor.isNativePlatform());
+
   const sett = () => {
     const vv = window.visualViewport;
     const full = window.innerHeight || (vv ? vv.height : 0);
     if (!full) return;
+    if (nativ) {
+      if (Math.abs(full - sist) < 1) return;
+      sist = full;
+      document.documentElement.style.setProperty("--app-h", full + "px");
+      return;
+    }
 
     // Er tastaturet oppe, skal appen ende der tastaturet begynner. Er det
     // nede, fyller den skjermen. Ingenting imellom.
@@ -220,7 +233,7 @@
      kommer ikke i veien for blaing slik høydemålingen gjorde. */
   const folgUtsnittet = () => {
     const vv = window.visualViewport;
-    if (!vv) return;
+    if (!vv || nativ) return;
     const y = Math.max(0, Math.round(vv.offsetTop));
     document.body.style.transform = y ? `translateY(${y}px)` : "";
   };

@@ -436,6 +436,8 @@ const UI = (() => {
      i stedet for at alle skal se på en spinner mens seks spørringer går
      over nettet. */
   async function openTrip(tripId, lagret) {
+    // Hvem du har blokkert, hentes før meldingene vises.
+    await Api.lastBlokkerte().catch(() => {});
     let trip = lagret;
     if (!trip) {
       $("bootMsg").innerHTML = venter("Henter turen");
@@ -608,9 +610,27 @@ const UI = (() => {
         </div>
       </section>`;
     } else {
-      kort = `<section class="naakort"><div class="merk"><i></i>Ferdig</div>
-        <div class="hva" style="margin-top:2px">Turen er over</div>
-        <div class="hvor">Programmet ligger her så lenge du er med.</div></section>`;
+      // «Turen er over» bare når siste dag er forbi. Før sto det der også
+      // på en tur som nettopp var laget, eller når dagens siste punkt var
+      // ferdig og turen fortsatte i morgen.
+      const sisteDato = trip.days.reduce((m, d) => d.date > m ? d.date : m, "");
+      const ingenPunkter = trip.days.every(d => !d.items.length);
+      if (ingenPunkter) {
+        // Lista under sier alt at dagen er tom. Et kort til med det samme
+        // budskapet var to tomme meldinger over hverandre.
+        kort = "";
+      } else if (trip.days.every(d => d.date > today())) {
+        const forste = trip.days.reduce((m, d) => !m || d.date < m ? d.date : m, "");
+        kort = `<section class="naakort"><div class="merk"><i></i>Snart</div>
+          <div class="hva" style="margin-top:2px">Turen starter ${esc(fmtKortDato(forste))}</div></section>`;
+      } else if (sisteDato && sisteDato >= today()) {
+        kort = `<section class="naakort"><div class="merk"><i></i>I dag</div>
+          <div class="hva" style="margin-top:2px">Ikke mer på programmet i dag</div></section>`;
+      } else {
+        kort = `<section class="naakort"><div class="merk"><i></i>Ferdig</div>
+          <div class="hva" style="margin-top:2px">Turen er over</div>
+          <div class="hvor">Programmet ligger her så lenge du er med.</div></section>`;
+      }
     }
     return kort;
   }
@@ -636,12 +656,16 @@ const UI = (() => {
       });
     }
 
-    const manglerSete = (tall.kjoretoy || 0) - (tall.mineSeter || 0);
-    if (manglerSete > 0) {
+    // Én rad per reise du mangler plass på, og bare der du kan velge selv.
+    // Fordeler reiselederen, er det ikke noe du kan gjøre. «Fredag og
+    // søndag» sier hva som mangler; «2 kjøretøy» sa det ikke.
+    const reiser = tall.seteGrupper || [];
+    const mangler = reiser.filter(g => g.fritt && !g.harPlass);
+    if (mangler.length) {
       rader.push({
         side: "seter",
-        hva: manglerSete === 1 && tall.kjoretoy === 1
-          ? "Du har ikke valgt sitteplass" : `Du mangler sitteplass i ${manglerSete} kjøretøy`,
+        hva: reiser.length === 1 ? "Velg sitteplass"
+          : `Velg sitteplass for ${oppramsing(mangler.map(g => reisenavn(g, reiser)))}`,
         hvorfor: "Sitteplasser"
       });
     }
@@ -666,7 +690,7 @@ const UI = (() => {
     if (!rader.length) return "";
     return `<div>
       <div class="eyebrow" style="margin-bottom:8px;color:var(--amber)">Venter på deg · ${rader.length}</div>
-      <div class="card pad venterkompakt" style="border-left:3px solid var(--amber)">
+      <div class="card pad venterkompakt" style="border-color:color-mix(in srgb, var(--amber) 45%, var(--line))">
         <div class="list">${rader.map(r => `<button class="listrow" data-side="${r.side}">
           <div class="grow"><div class="nm">${esc(r.hva)}</div></div>
           <span class="chev">${ICON.chev}</span></button>`).join("")}</div>
@@ -682,13 +706,25 @@ const UI = (() => {
   function setetekst(tall) {
     if (!tall) return "";
     if (!tall.kjoretoy) return "Ikke satt opp";
-    const mangler = tall.kjoretoy - tall.mineSeter;
+    const reiser = tall.seteGrupper || [];
     const liste = tall.mineSeterListe || [];
-    // Ett kjøretøy og en plass: si plassen. Flere: si hvor mange som mangler.
-    if (tall.kjoretoy === 1 && liste.length === 1) return plassnavn(liste[0].k, liste[0].nr);
-    if (mangler > 0) return `Mangler ${mangler} av ${tall.kjoretoy}`;
-    return liste.length === 1 ? plassnavn(liste[0].k, liste[0].nr) : "Alt valgt";
+    const mangler = reiser.filter(g => g.fritt && !g.harPlass).length;
+    if (mangler) return reiser.length === 1 ? "Velg plass" : `Velg plass (${mangler})`;
+    if (liste.length === 1) return plassnavn(liste[0].k, liste[0].nr);
+    if (!liste.length) return "Ikke fordelt ennå";
+    return reiser.every(g => g.harPlass) ? "Alt valgt" : `${liste.length} plasser`;
   }
+
+  /* «fredag 20. nov.», eller «hele turen». Har samme dag både buss og tog,
+     sier vi hvilken. */
+  function reisenavn(g, alle) {
+    const dag = g.dato
+      ? new Date(g.dato + "T12:00").toLocaleDateString("nb-NO", { weekday: "long", day: "numeric", month: "short" })
+      : "hele turen";
+    const flere = alle.filter(x => x.dato === g.dato).length > 1;
+    return flere && g.slag ? `${dag} (${g.slag === "tog" ? "tog" : "buss og bil"})` : dag;
+  }
+  const oppramsing = d => d.length < 2 ? (d[0] || "") : d.slice(0, -1).join(", ") + " og " + d[d.length - 1];
 
   function praktisk() {
     const tall = S.megTall;
@@ -704,17 +740,17 @@ const UI = (() => {
             : ""}</span>
           <span class="chev">${ICON.chev}</span></button>
 
-        <button class="listrow" data-side="seter">
+        ${leder || !tall || tall.kjoretoy ? `<button class="listrow" data-side="seter">
           <span class="rikon">${ICON.sete}</span>
           <div class="grow"><div class="nm">Sitteplasser</div></div>
           <span class="verdi">${setetekst(tall)}</span>
-          <span class="chev">${ICON.chev}</span></button>
+          <span class="chev">${ICON.chev}</span></button>` : ""}
 
-        <button class="listrow" data-side="rom">
+        ${leder || !tall || tall.rom ? `<button class="listrow" data-side="rom">
           <span class="rikon grunn">${ICON.nokkel}</span>
           <div class="grow"><div class="nm">Rom</div></div>
           <span class="verdi">${romtekst(tall)}</span>
-          <span class="chev">${ICON.chev}</span></button>
+          <span class="chev">${ICON.chev}</span></button>` : ""}
 
         <button class="listrow" data-side="kontakt">
           <span class="rikon gul">${ICON.telefon}</span>
@@ -1016,7 +1052,9 @@ const UI = (() => {
           </div>` : ""}
         </div>
       </div>`;
-    }).join("") : `<p class="muted" style="padding:16px 0;text-align:center">Ingen punkter denne dagen.</p>`;
+    }).join("") : `<p class="muted" style="padding:16px 0;text-align:center">${
+      trip.role !== "leader" && trip.days.every(x => !x.items.length)
+        ? "Reiselederen har ikke lagt inn programmet ennå." : "Ingen punkter denne dagen."}</p>`;
 
     return `
       ${dagTopp(d)}
@@ -1467,7 +1505,89 @@ const UI = (() => {
         ${viserBilde ? `<button class="btn" data-lagrebilde="${esc(bilde)}">${ICON.last} Lagre bildet</button>` : ""}
         ${viserTekst ? `<button class="btn" data-kopimeld="${esc(txt)}">Kopier teksten</button>` : ""}
         ${slettvalg}
+        ${m && !m.mine && m.authorId ? `
+        <button class="btn" data-rapporter="${esc(id)}">Rapporter ${viserBilde && !viserTekst ? "bildet" : "meldingen"}</button>
+        <button class="btn danger-tekst" data-blokker="${esc(m.authorId)}" data-navn="${esc(m.who)}">Blokker ${esc(fornavn(m.who))}</button>` : ""}
       </div>
+      <button class="btn close" data-close>Lukk</button>`);
+  }
+
+  /* ───────── rapportere og blokkere (Apple 1.2) ───────── */
+  const GRUNNER = ["Trakassering eller mobbing", "Hat eller trusler", "Seksuelt innhold", "Noe annet som ikke hører hjemme her"];
+  function sheetRapporter(id) {
+    const m = Api.messages(S.openChat).find(x => x.id === id);
+    if (!m) return;
+    openSheet(`<h3>Rapporter</h3>
+      <p class="lede">Rapporten går til reiselederne og til TripMate. Reiselederne ser ikke hvem som sendte den.</p>
+      <form id="rpForm">
+        <div class="stack">${GRUNNER.map((g, i) => `<label class="pick">
+          <input type="radio" name="rpGrunn" value="${esc(g)}"${i === 0 ? " checked" : ""}><span><b>${esc(g)}</b></span></label>`).join("")}</div>
+        <div class="field" style="margin-top:14px"><label for="rpMer">Mer du vil si (valgfritt)</label>
+          <input id="rpMer" maxlength="300" autocomplete="off"></div>
+        <p class="err" id="rpErr" hidden></p>
+        <button class="btn primary big" type="submit" id="rpSend">Send rapport</button>
+      </form>
+      <button class="btn close" data-close>Avbryt</button>`);
+    $("rpForm").addEventListener("submit", async e => {
+      e.preventDefault();
+      const valgt = document.querySelector('input[name="rpGrunn"]:checked');
+      const mer = $("rpMer").value.trim();
+      const btn = $("rpSend"); btn.disabled = true; btn.textContent = "Sender…";
+      try {
+        await Api.rapporter({
+          tripId: S.trip.id, messageId: m.id, gjelder: m.authorId, gjelderNavn: m.who,
+          grunn: (valgt ? valgt.value : GRUNNER[3]) + (mer ? ": " + mer : ""),
+          utdrag: m.txt || (m.bilde ? "[bilde]" : "")
+        });
+        closeSheet();
+        // Rapporten er sendt; spør om personen også skal blokkeres, slik
+        // man forventer etter å ha rapportert noe.
+        if (await bekreft(`Takk. Rapporten er sendt, og blir sett på innen 24 timer.\n\nVil du også blokkere ${m.who}? Da ser du ikke meldingene deres lenger.`,
+          { ja: `Blokker ${fornavn(m.who)}`, nei: "Nei takk", fare: true })) {
+          await Api.blokker(m.authorId, m.who);
+          render();
+        }
+      } catch (err) {
+        btn.disabled = false; btn.textContent = "Send rapport";
+        const e2 = $("rpErr"); e2.textContent = "Klarte ikke sende rapporten. Sjekk nettet og prøv igjen."; e2.hidden = false;
+      }
+    });
+  }
+
+  async function blokkerPerson(id, navn) {
+    if (!await bekreft(`Blokkere ${navn}?\n\nDu ser ikke meldingene deres lenger, i noen tur. ${fornavn(navn)} får ikke vite det. Du kan oppheve det under Meg.`,
+      { ja: "Blokker", fare: true })) return;
+    try { await Api.blokker(id, navn); closeSheet(); render(); toast(`${navn} er blokkert.`); }
+    catch { toast("Klarte ikke blokkere. Sjekk nettet og prøv igjen."); }
+  }
+
+  function sheetBlokkerte() {
+    const liste = Api.blokkertListe();
+    openSheet(`<h3>Blokkerte personer</h3>
+      <p class="lede">Du ser ikke meldinger fra disse. De vet ikke at de er blokkert.</p>
+      <div class="memberlist">${liste.map(p => `<div class="person"><span>${esc(p.navn || "Ukjent")}</span>
+        <button class="linkbtn" data-opphevblokk="${esc(p.id)}">Opphev</button></div>`).join("")
+        || '<p class="muted" style="padding:10px">Du har ikke blokkert noen.</p>'}</div>
+      <button class="btn close" data-close>Lukk</button>`);
+  }
+
+  /* Reiselederen får rapportene på turen sin, uten navnet på den som
+     rapporterte. Tre utfall: slett meldingen, ta personen ut av turen,
+     eller marker den som ferdig. */
+  async function sheetRapportliste() {
+    const liste = await Api.rapportListe(S.trip.id);
+    S.rapporter = liste;
+    openSheet(`<h3>Rapporter</h3>
+      <p class="lede">Deltakere har rapportert dette. Se på det snart; TripMate lover svar innen 24 timer.</p>
+      ${liste.map(r => `<div class="card pad" style="margin-bottom:10px">
+        <div class="nm" style="font-weight:600">${esc(r.navn || "Ukjent")}</div>
+        <div class="sub muted" style="font-size:13.5px;margin:2px 0 8px">${esc(r.grunn)}</div>
+        ${r.utdrag ? `<p style="margin:0 0 12px;padding:10px 12px;background:var(--surface-2);border-radius:10px;font-size:14.5px">${esc(r.utdrag)}</p>` : ""}
+        <div class="stack">
+          ${r.messageId ? `<button class="btn danger" data-rappslett="${esc(r.id)}">Slett meldingen</button>` : '<p class="muted" style="margin:0;font-size:13.5px">Meldingen er alt slettet.</p>'}
+          ${r.megSelv ? "" : `<button class="btn" data-rappfjern="${esc(r.id)}">Ta ${esc(fornavn(r.navn || "personen"))} ut av turen</button>`}
+          <button class="btn" data-rappferdig="${esc(r.id)}">Ferdig, ingenting mer å gjøre</button>
+        </div></div>`).join("") || '<p class="muted">Ingen rapporter venter.</p>'}
       <button class="btn close" data-close>Lukk</button>`);
   }
 
@@ -1609,7 +1729,7 @@ const UI = (() => {
       : `<p style="margin:9px 0 0;font-size:13.5px;color:var(--ink-2)">
            I nettlesermenyen finner du <b>Installer</b> eller <b>Legg til på startsiden</b>.</p>`;
 
-    return `<div class="card pad" style="padding-block:15px;border-left:3px solid var(--blue)">
+    return `<div class="card pad" style="padding-block:15px;border-color:color-mix(in srgb, var(--blue) 45%, var(--line))">
       <b style="font-family:"DM Sans",sans-serif;font-size:14.5px">Legg TripMate på hjemskjermen</b>
       <p style="margin:7px 0 0;font-size:13.5px;color:var(--ink-2)">
         Da åpnes den som en app, husker deg${iOS
@@ -1638,7 +1758,7 @@ const UI = (() => {
     if (!o.length) {
       return `<div class="ordnes">
         <div class="eyebrow" style="margin-bottom:8px;color:var(--moss)">Alt er i orden</div>
-        <div class="card pad" style="padding-block:14px;border-left:3px solid var(--moss)">
+        <div class="card pad" style="padding-block:14px;border-color:color-mix(in srgb, var(--moss) 45%, var(--line))">
           <p class="muted" style="margin:0">${skjulte.length
             ? "Ingenting venter på deg. Det du har krysset av ligger under."
             : "Alle steder har adresse, og alle dager har hotell."}</p>
@@ -1649,7 +1769,7 @@ const UI = (() => {
 
     return `<div class="ordnes">
       <div class="eyebrow" style="margin-bottom:8px;color:var(--amber)">Må ordnes · ${o.length}</div>
-      <div class="card pad" style="border-left:3px solid var(--amber)">
+      <div class="card pad" style="border-color:color-mix(in srgb, var(--amber) 45%, var(--line))">
         <div class="list">${o.map(x => `<div class="oppgave">
           <button class="listrow" ${x.side
             ? `data-side="${esc(x.side)}"`
@@ -1686,7 +1806,7 @@ const UI = (() => {
     if (!t || t.role !== "leader" || !t.slettes) return "";
     const n = daysUntil(t.slettes);
     if (n > 7) return "";
-    return `<div class="card pad" style="padding-block:14px;border-left:3px solid var(--danger)">
+    return `<div class="card pad" style="padding-block:14px;border-color:color-mix(in srgb, var(--danger) 45%, var(--line))">
       <b style="font-family:"DM Sans",sans-serif;font-size:14.5px">${n <= 0 ? "Turen slettes i natt" : `Turen slettes om ${n} ${n === 1 ? "dag" : "dager"}`}</b>
       <p style="margin:6px 0 12px;font-size:13.5px;color:var(--ink-2)">${esc(sletteTekst(t.slettes))}. Program, chatter, bilder og
         deltakerlister forsvinner for alle. Trenger dere noe fra turen, kan du utsette.</p>
@@ -1710,10 +1830,24 @@ const UI = (() => {
       <button class="btn close" data-close>Lukk</button>`);
   }
 
+  function rapportkort() {
+    const n = (S.rapporter || []).length;
+    if (S.trip.role !== "leader" || !n) return "";
+    return `<div>
+      <div class="eyebrow" style="margin-bottom:8px;color:var(--danger)">Rapportert · ${n}</div>
+      <div class="card pad" style="border-color:color-mix(in srgb, var(--danger) 40%, var(--line))">
+        <div class="list"><button class="listrow" data-sheet="rapporter">
+          <div class="grow"><div class="nm">${n === 1 ? "En melding er rapportert" : `${n} meldinger er rapportert`}</div>
+            <div class="sub">Se på det og bestem hva som skal skje</div></div>
+          <span class="chev">${ICON.chev}</span></button></div>
+      </div></div>`;
+  }
+
   function viewTuren() {
     const trip = S.trip;
     const leder = trip.role === "leader";
     return `
+      ${rapportkort()}
       ${slettekort()}
       ${maaOrdnes()}
       ${praktisk()}
@@ -1773,7 +1907,7 @@ const UI = (() => {
     const tall = S.megTall;              // null til de er hentet
     const trip = S.trip;
     const varslerAv = varslerErAv();
-    const varselTekst = erNativ() ? "Kommer i en oppdatering"
+    const varselTekst = erNativ() ? "Kommer snart"
       : varslerAv
       ? (S.varselStatus === "avslaatt" ? "Blokkert i nettleseren" : "Ikke slått på her")
       : S.varselStatus === "umulig" ? "Ikke mulig i denne nettleseren"
@@ -1808,6 +1942,12 @@ const UI = (() => {
             <div class="grow"><div class="nm">Varsler${varslerAv ? '<span class="prikkmerke"></span>' : ""}</div></div>
             <span class="verdi"${varslerAv ? ' style="color:var(--amber)"' : ""}>${esc(varselTekst)}</span>
             <span class="chev">${ICON.chev}</span></button>
+
+          ${Api.blokkertListe().length ? `<button class="listrow" data-sheet="blokkerte">
+            <span class="rikon grunn">${ICON.folk}</span>
+            <div class="grow"><div class="nm">Blokkerte personer</div></div>
+            <span class="verdi">${Api.blokkertListe().length}</span>
+            <span class="chev">${ICON.chev}</span></button>` : ""}
 
           <button class="listrow" data-sheet="omvisning">
             <span class="rikon mose">${ICON.info}</span>
@@ -1954,6 +2094,7 @@ const UI = (() => {
                           : visningFor(S.tab);
     if (side === "varsler") settOppVarsler();
     if (byttetVisning && !conv) $("screen").scrollTop = 0;
+    sjekkTopp();
 
     const slot = $("composerSlot");
     // Skrivefeltet bygges opp på nytt hver gang noe tegnes. Det du har
@@ -2167,6 +2308,7 @@ const UI = (() => {
      som endrer dem har skjedd imens. */
   function hentMegTall(tvang) {
     if (!S.trip || (S.megTall && !tvang)) return;
+    if (S.trip.role === "leader") Api.rapportListe(S.trip.id).then(r => { S.rapporter = r; }).catch(() => {});
     Api.megTall(S.trip.id).then(t => {
       S.megTall = t;
       if (S.trip && (S.tab === "meg" || S.tab === "turen" || S.tab === "program") && !S.side && !S.openChat) render();
@@ -2459,8 +2601,12 @@ const UI = (() => {
         l.onerror = nei;
         l.readAsDataURL(fil);
       });
-      const navn = `tripmate-${Date.now()}.jpg`;
-      await Fs.writeFile({ path: navn, data: b64, directory: "CACHE" });
+      // Fila beholder navnet og endelsen sin. Før ble alt kalt .jpg, så
+      // kalenderfila kom fram som et bilde Kalender ikke ville åpne. Hver
+      // deling får sin egen mappe, så like navn ikke krasjer.
+      const egen = /\.[a-z0-9]{2,5}$/i.test(fil.name || "") ? fil.name.replace(/[\/\\]/g, "") : "tripmate.jpg";
+      const navn = `deling/${Date.now()}/${egen}`;
+      await Fs.writeFile({ path: navn, data: b64, directory: "CACHE", recursive: true });
       const { uri } = await Fs.getUri({ path: navn, directory: "CACHE" });
       await Share.share({ files: [uri] });
       return true;
@@ -2497,12 +2643,57 @@ const UI = (() => {
   }
 
   /* ───────────────── send melding ───────────────── */
+  /* Apple 1.2: et filter som stopper det verste før det sendes. Bare
+     tydelige skjellsord, hets og oppfordringer til selvskading — ikke
+     vanlig banning, som ville gitt falske treff i helt greie meldinger. */
+  const FORBUDT = [
+    // Disse stoppes også inne i et lengre ord («horeHei»), siden ingen
+    // vanlige norske ord begynner slik.
+    /\bhore/i, /\bfitte/i, /\bneger/i, /\bnegre/i, /\bn[i1!]gg/i, /\bfaggot/i, /\bretard/i,
+    // Disse kan være begynnelsen på helt vanlige ord, så de må stå alene.
+    /\bhor(?:a|en|er|ene)\b/i, /\bpikk(?:en|er)?\b/i, /\bsoperi?\b/i, /\bmongo(?:er|en)?\b/i,
+    /\b(?:kys|drep) deg selv\b/i, /\bkill yourself\b/i, /\bkys\b(?=\W*$)/i
+  ];
+  const harForbudtOrd = t => FORBUDT.some(r => r.test(t));
+
+  /* Første gang du skriver, godtar du reglene for chatten. Svaret huskes
+     på telefonen. Versjonen i nøkkelen gjør at vi kan spørre på nytt om
+     reglene endres. */
+  const REGLER_NOKKEL = "tm.chatregler.v1";
+  async function godtattChatregler() {
+    try { if (localStorage.getItem(REGLER_NOKKEL)) return true; } catch {}
+    const ok = await new Promise(svar => {
+      if (ventendeSvar) { const r = ventendeSvar; ventendeSvar = null; r(false); }
+      openSheet(`<h3>Regler for chatten</h3>
+        <p class="lede">Godta reglene før du skriver første gang.</p>
+        <ul class="regler">
+          <li>Ingen trakassering, mobbing, trusler eller hets.</li>
+          <li>Ikke seksuelt innhold, og ikke bilder av andre uten at de har sagt ja.</li>
+          <li>Du kan rapportere meldinger og blokkere personer. Rapporter blir sett på innen 24 timer.</li>
+          <li>Den som bryter reglene, kan bli tatt ut av turen og utestengt.</li>
+        </ul>
+        <p class="muted" style="font-size:14px;margin:0 0 16px">Hele vilkårene står under Meg → Om appen.</p>
+        <button class="btn primary big" id="rgJa">Jeg godtar</button>
+        <button class="btn close" id="rgNei">Avbryt</button>`);
+      ventendeSvar = svar;          // lukkes arket uten svar, er svaret nei
+      $("rgJa").addEventListener("click", () => { ventendeSvar = null; closeSheet(); svar(true); });
+      $("rgNei").addEventListener("click", () => closeSheet());
+    });
+    if (ok) { try { localStorage.setItem(REGLER_NOKKEL, new Date().toISOString()); } catch {} }
+    return ok;
+  }
+
   async function onSend(e) {
     e.preventDefault();
     const inp = $("msgInput");
     const txt = inp.value.trim();
     const vedlegg = S.vedlegg;
     if ((!txt && !vedlegg) || S.busy) return;
+    if (txt && harForbudtOrd(txt)) {
+      toast("Meldingen ble ikke sendt. Den inneholder ord som ikke er lov i TripMate.");
+      return;
+    }
+    if (!await godtattChatregler()) return;
     inp.value = "";
     // Uten bilde tolker vi teksten; med bilde er den en bildetekst, og en
     // bildetekst skal ikke plutselig lage et programpunkt.
@@ -2613,6 +2804,9 @@ const UI = (() => {
       if (!iHandtak) {
         // Står du i et felt, skriver du — da skal ikke arket flytte seg.
         if (kontroll(mål)) return false;
+        // Står tastaturet oppe, legger første drag bort tastaturet
+        // (js/native.js). Arket blir der det er.
+        if (document.documentElement.classList.contains("tastatur")) return false;
         // Ellers: er du øverst, drar du hele arket, uansett hvor du tar
         // tak. Er du lenger nede, skroller du.
         const k = kroppen();
@@ -2955,8 +3149,8 @@ const UI = (() => {
     openSheet(`<h3>Lag en ny tur</h3>
       <p class="muted" style="margin:6px 0 14px">Du blir reiseleder og får en turkode å dele ut.</p>
       <form id="newTripForm" novalidate>
-        ${p ? "" : `<div class="field"><label for="tFirst">Ditt fornavn</label><input id="tFirst" autocomplete="given-name"></div>
-                    <div class="field"><label for="tLast">Ditt etternavn</label><input id="tLast" autocomplete="family-name"></div>`}
+        ${p ? "" : `<div class="field"><label for="tFirst">Ditt fornavn</label><input id="tFirst" autocapitalize="words" autocorrect="off" spellcheck="false" autocomplete="given-name"></div>
+                    <div class="field"><label for="tLast">Ditt etternavn</label><input id="tLast" autocapitalize="words" autocorrect="off" spellcheck="false" autocomplete="family-name"></div>`}
         <div class="field"><label for="tName">Navn på turen</label><input id="tName" placeholder="Barcelona 2027"></div>
         <div class="field"><label for="tOrg">Gruppe</label><input id="tOrg" placeholder="Sandnes IL G16, salgsavdelingen eller 10B"></div>
         ${sporsmaal("tProgram", "Hvordan vil du lage programmet?", "", [
@@ -3038,7 +3232,7 @@ const UI = (() => {
         </dl>
       </div>
       <form id="paForm" novalidate>
-        <div class="field"><label for="paNavn">Navn</label><input id="paNavn" maxlength="80" autocomplete="off" value="${esc(mitt ? mitt.navn : "")}" placeholder="Kari Nordmann"></div>
+        <div class="field"><label for="paNavn">Navn</label><input id="paNavn" autocapitalize="words" autocorrect="off" spellcheck="false" maxlength="80" autocomplete="off" value="${esc(mitt ? mitt.navn : "")}" placeholder="Kari Nordmann"></div>
         <div class="field"><label for="paTlf">Telefon</label><input id="paTlf" type="tel" inputmode="tel" maxlength="30" autocomplete="off" value="${esc(mitt ? mitt.telefon : "")}" placeholder="+47 900 00 000"></div>
         <label class="pick" style="margin-bottom:12px"><input type="checkbox" id="paSamtykke" ${mitt ? "checked" : ""}>
           <span><b>Det er greit at reiselederne ser dette</b><br>
@@ -3071,8 +3265,8 @@ const UI = (() => {
     openSheet(`<h3>Endre navnet ditt</h3>
       <p class="lede">Navnet vises for alle på turene dine. Det endres på alle turene samtidig.</p>
       <form id="enForm" novalidate>
-        <div class="field"><label for="enFirst">Fornavn</label><input id="enFirst" value="${esc(p.first || "")}" autocomplete="given-name"></div>
-        <div class="field"><label for="enLast">Etternavn</label><input id="enLast" value="${esc(p.last || "")}" autocomplete="family-name"></div>
+        <div class="field"><label for="enFirst">Fornavn</label><input id="enFirst" autocapitalize="words" autocorrect="off" spellcheck="false" value="${esc(p.first || "")}" autocomplete="given-name"></div>
+        <div class="field"><label for="enLast">Etternavn</label><input id="enLast" autocapitalize="words" autocorrect="off" spellcheck="false" value="${esc(p.last || "")}" autocomplete="family-name"></div>
         <p class="err" id="enErr" hidden></p>
         <button class="btn primary big" type="submit" id="enLagre">Lagre</button>
       </form>
@@ -3102,8 +3296,8 @@ const UI = (() => {
     openSheet(`<h3>Rett navnet</h3>
       <p class="lede">Gjelder bare denne turen.</p>
       <form id="rnForm" novalidate>
-        <div class="field"><label for="rnFirst">Fornavn</label><input id="rnFirst" value="${esc(deler.slice(0, -1).join(" ") || deler[0] || "")}"></div>
-        <div class="field"><label for="rnLast">Etternavn</label><input id="rnLast" value="${esc(deler.length > 1 ? deler[deler.length - 1] : "")}"></div>
+        <div class="field"><label for="rnFirst">Fornavn</label><input id="rnFirst" autocapitalize="words" autocorrect="off" spellcheck="false" value="${esc(deler.slice(0, -1).join(" ") || deler[0] || "")}"></div>
+        <div class="field"><label for="rnLast">Etternavn</label><input id="rnLast" autocapitalize="words" autocorrect="off" spellcheck="false" value="${esc(deler.length > 1 ? deler[deler.length - 1] : "")}"></div>
         <p class="err" id="rnErr" hidden></p>
         <button class="btn primary big" type="submit" id="rnLagre">Lagre</button>
       </form>
@@ -3259,7 +3453,7 @@ const UI = (() => {
           </select>
         </div>
         <div id="newPlaceFields" hidden>
-          <div class="field"><label for="pName">Navn på stedet</label><input id="pName" placeholder="Gedenkstätte Berliner Mauer"></div>
+          <div class="field"><label for="pName">Navn på stedet</label><input id="pName" autocapitalize="words" autocorrect="off" spellcheck="false" placeholder="Gedenkstätte Berliner Mauer"></div>
           <div class="field"><label for="pAddr">Adresse</label><input id="pAddr" placeholder="Bernauer Straße 111, 13355 Berlin"></div>
           <div class="field"><label for="pKind">Type</label>
             <select id="pKind" class="select">
@@ -3313,7 +3507,11 @@ const UI = (() => {
         // programmet», og forslaget forsvinner for de andre lederne.
         if (f.fraMelding) await Api.merkIProgrammet(f.fraMelding, nyId).catch(() => {});
         closeSheet();
+        // Kom du fra chatten, skal du bli stående i samtalen. openTrip lukker
+        // den, så den åpnes igjen (uten nytt steg i tilbake-historikken).
+        const varI = f.fraMelding ? S.openChat : null;
         await openTrip(S.trip.id);
+        if (varI) { S.tab = "chat"; await openChat(varI, true); }
       } catch (e2) {
         btn.disabled = false; btn.textContent = "Legg til punktet";
         err.textContent = e2.message; err.hidden = false;
@@ -3335,7 +3533,7 @@ const UI = (() => {
           </select>
         </div>
         <div id="hNewFields" hidden>
-          <div class="field"><label for="hName">Navn</label><input id="hName" placeholder="Hotel Moabit Plaza"></div>
+          <div class="field"><label for="hName">Navn</label><input id="hName" autocapitalize="words" autocorrect="off" spellcheck="false" placeholder="Hotel Moabit Plaza"></div>
           <div class="field"><label for="hAddr">Adresse</label><input id="hAddr" placeholder="Stromstraße 62, 10551 Berlin"></div>
         </div>
         <p class="err" id="hErr" hidden></p>
@@ -3543,7 +3741,7 @@ const UI = (() => {
         ${fl(dager.length, "dag", "dager")} og ${fl(antall, "punkt", "punkter")}, i samme rekkefølge som i filen.
         ${merknader.length ? `Se ${fl(merknader.length, "merknad", "merknader")} nederst.` : ""}</p>
       ${bolker}
-      ${merknader.length ? `<div class="card pad" style="padding-block:12px;margin-bottom:16px;border-left:3px solid var(--amber)">
+      ${merknader.length ? `<div class="card pad" style="padding-block:12px;margin-bottom:16px;border-color:color-mix(in srgb, var(--amber) 45%, var(--line))">
         <div class="eyebrow" style="color:var(--amber)">Merknader</div>
         <ul style="margin:8px 0 0;padding-left:18px;font-size:13.5px;color:var(--ink-2)">
           ${merknader.map(a => `<li>${esc(a)}</li>`).join("")}</ul></div>` : ""}
@@ -3858,7 +4056,7 @@ const UI = (() => {
     if (!kart.length) return `
       ${utenNett(S.setekart)}
       <p class="muted" style="margin:0">${leder
-        ? "Legg inn hvert kjøretøy turen bruker. Har dere buss ned og tog hjem, er det to oppsett — og én plass i hvert."
+        ? "Legg inn hvert kjøretøy turen bruker, og hvilken dag det gjelder. Buss ned og tog hjem er to reiser, og hver deltaker får én plass på hver. Flere biler samme dag er én reise: hver deltaker sitter i én av dem."
         : "Reiselederen har ikke satt opp noe setekart ennå."}</p>
       ${nyknapp}`;
 
@@ -3876,35 +4074,49 @@ const UI = (() => {
      sine datoer. Har ingen av dem en dato, er det ingen gruppe å vise og
      lista står som før. */
   function kjoretoygrupper(kart, leder) {
-    if (!kart.some(k => k.dato)) return kart.map(k => kjoretoykort(k, leder)).join("");
+    // Én overskrift per dag, i dagens rekkefølge, og «Hele turen» sist.
+    // Står bare ett kjøretøy uten dato, trengs ingen overskrift.
+    if (kart.length === 1 && !kart[0].dato) return kjoretoykort(kart[0], leder);
 
-    const datoer = Array.from(new Set(kart.map(k => k.dato).filter(Boolean))).sort();
-    const grupper = datoer.map(d => ({ dato: d, kart: kart.filter(k => k.dato === d) }));
-    const utenDato = kart.filter(k => !k.dato);
-    if (utenDato.length) grupper.push({ dato: null, kart: utenDato });
-
+    const datoer = Array.from(new Set(kart.map(k => k.dato || ""))).sort((a, b) =>
+      a === "" ? 1 : b === "" ? -1 : a.localeCompare(b));
     // I dag først: det er det ene spørsmålet noen stiller setekartet
     // mens turen går.
-    grupper.sort((a, b) => (b.dato === today()) - (a.dato === today()));
+    datoer.sort((a, b) => (b === today()) - (a === today()));
 
-    return grupper.map(g => `<div>
-      <div class="eyebrow" style="margin-bottom:8px${g.dato === today() ? ";color:var(--blue-ink)" : ""}">${
-        g.dato === null ? "Hele turen"
-        : g.dato === today() ? "I dag"
-        : esc(cap(Api.fmtDay(g.dato).label))}</div>
-      ${g.kart.map(k => kjoretoykort(k, leder)).join("")}
-    </div>`).join("");
+    return datoer.map(d => {
+      const paaDagen = kart.filter(k => (k.dato || "") === d);
+      const tittel = d === "" ? "Hele turen" : d === today() ? "I dag" : cap(Api.fmtDay(d).label);
+      // Kjøretøy som kjører samtidig står sammen, med én linje som sier
+      // at man sitter i ett av dem. Uten den så Bil 1 og Bil 2 ut som to
+      // plasser man skulle ha.
+      const deler = Api.samtidigGrupper(paaDagen).map(g => {
+        const valg = g.kart.length > 1;
+        const minI = g.kart.find(k => k.seter.some(x => x.meg));
+        const hint = !valg ? "" : leder
+          ? `<p class="muted kjhint">${g.kart.length} kjøretøy samtidig. Hver deltaker får plass i ett av dem.</p>`
+          : `<p class="muted kjhint">${minI ? `Du sitter i ${esc(minI.navn)}.` : "Velg plass i ett av dem."}</p>`;
+        return hint + g.kart.map(k => kjoretoykort(k, leder)).join("");
+      }).join("");
+      return `<div>
+        <div class="eyebrow" style="margin-bottom:8px${d === today() ? ";color:var(--blue-ink)" : ""}">${esc(tittel)}</div>
+        ${deler}
+      </div>`;
+    }).join("");
   }
 
   function toppTekst(kart, leder) {
-    const mine = kart.filter(k => !k.seter.some(s2 => s2.meg));
     if (leder) {
       const tomme = kart.reduce((n, k) => n + (k.plasser - k.seter.length), 0);
-      return `<p class="muted" style="margin:0">${kart.length} oppsett · ${tomme} ledige plasser til sammen.</p>`;
+      return `<p class="muted" style="margin:0">${kart.length} ${kart.length === 1 ? "kjøretøy" : "kjøretøy"} · ${tomme} ledige plasser til sammen.</p>`;
     }
-    if (!mine.length) return '<p class="muted" style="margin:0">Du har plass i alle.</p>';
-    return `<p class="muted" style="margin:0">Du mangler plass i ${mine.length === kart.length && kart.length === 1
-      ? "kartet under" : `${mine.length} av ${kart.length}`}.</p>`;
+    const reiser = Api.samtidigGrupper(kart);
+    const mangler = reiser.filter(g => g.kart.some(k => k.fritt) && !g.kart.some(k => k.seter.some(x => x.meg)));
+    if (!mangler.length) return "";
+    const navn = mangler.map(g => reisenavn({ dato: g.dato, slag: g.slag }, reiser));
+    return `<p class="muted" style="margin:0">${reiser.length === 1
+      ? "Trykk på en ledig plass for å ta den."
+      : `Du har ikke valgt plass for ${esc(oppramsing(navn))}. Trykk på en ledig plass.`}</p>`;
   }
 
   /* Forespørsler om bytte. Et bytte gjelder to personer, så det som
@@ -3943,7 +4155,7 @@ const UI = (() => {
     if (!rader.length) return "";
     return `<div>
       <div class="eyebrow" style="margin-bottom:8px;color:var(--amber)">Bytter · ${rader.length}</div>
-      <div class="card pad" style="border-left:3px solid var(--amber)">
+      <div class="card pad" style="border-color:color-mix(in srgb, var(--amber) 45%, var(--line))">
         ${rader.map(r => `<div class="bytterad">
           <div class="nm">${r.hva}</div>
           <div class="sub">${r.under}</div>
@@ -3993,28 +4205,21 @@ const UI = (() => {
 
     // Din plass hører til i undertittelen, ikke i en egen kolonne: med et
     // langt kjøretøynavn ble de tre tingene stående og slåss om bredden.
-    const status = mitt
-      ? `du har ${plassnavn(k, mitt.nr)}`
-      : `${k.seter.length} tatt`;
-    const maate = k.fritt ? "alle velger selv" : "reiselederen fordeler";
+    // Én linje som svarer på det man lurer på: for deltakeren «hvor
+    // sitter jeg», for reiselederen «hvor fullt er det». Hvem som velger,
+    // står her fordi det avgjør hva et trykk gjør.
+    const status = leder
+      ? `${k.seter.length} av ${k.plasser} tatt · ${k.fritt ? "deltakerne velger selv" : "du fordeler"}`
+      : mitt ? `Du har ${plassnavn(k, mitt.nr)}`
+      : k.fritt ? `${k.plasser - k.seter.length} ledige` : "Reiselederen fordeler plassene";
 
     return `<div class="kjkort">
       <div class="kjtopp">
         <div class="grow"><b>${esc(k.navn)}</b>
-          <small>${esc(o.navn)} · ${k.plasser} plasser · ${esc(status)} · ${esc(maate)}</small></div>
+          <small>${esc(o.navn)} · ${esc(status)}</small></div>
         ${leder ? `<button class="minibtn" data-endrekj="${esc(k.id)}"
           aria-label="Endre ${esc(k.navn)}">${ICON.blyant}</button>` : ""}
       </div>
-      ${leder ? `<div class="gruppe" style="margin-bottom:12px"><div class="list">
-        <label class="listrow" style="cursor:pointer">
-          <div class="grow"><div class="nm">Deltakerne velger selv</div>
-            <div class="sub">Av: du setter hvem som sitter hvor.</div></div>
-          <input type="checkbox" class="bryter" data-kjfritt="${esc(k.id)}" ${k.fritt ? "checked" : ""}></label>
-        <label class="listrow" style="cursor:pointer">
-          <div class="grow"><div class="nm">Jeg må godkjenne bytter</div>
-            <div class="sub">Av: det holder at den andre sier ja.</div></div>
-          <input type="checkbox" class="bryter" data-kjgodkjenn="${esc(k.id)}" ${k.godkjenn ? "checked" : ""}></label>
-      </div></div>` : ""}
       <div class="setekart">${seteRader(k).map(rad).join("")}</div>
       ${leder ? `<div class="kjknapper">
         <button class="btn" data-fyllseter="${esc(k.id)}">Fyll ledige plasser</button>
@@ -4228,7 +4433,7 @@ const UI = (() => {
 
       ${leder && uten.length ? `<div>
         <div class="eyebrow" style="margin-bottom:8px;color:var(--amber)">Uten seng · ${uten.length}</div>
-        <div class="card pad" style="border-left:3px solid var(--amber)">
+        <div class="card pad" style="border-color:color-mix(in srgb, var(--amber) 45%, var(--line))">
           <div class="memberlist">${uten.map(p => `<div class="person">
             <span>${esc(p.navn)}${p.leder ? ' <em>reiseleder</em>' : ""}</span>
             <button class="linkbtn" data-settrom="${esc(p.id)}">gi rom</button>
@@ -4310,11 +4515,11 @@ const UI = (() => {
     return `<div class="gruppe"><div class="list">
       <label class="listrow" style="cursor:pointer">
         <div class="grow"><div class="nm">Deltakerne kan flytte seg selv</div>
-          <div class="sub">Av: bare du setter hvem som bor hvor.</div></div>
+          <div class="sub">${S.trip.romFritt ? "Hver deltaker velger seng selv." : "Bare du setter hvem som bor hvor."}</div></div>
         <input type="checkbox" class="bryter" data-romfritt="1" ${S.trip.romFritt ? "checked" : ""}></label>
       <label class="listrow" style="cursor:pointer">
-        <div class="grow"><div class="nm">Jeg må godkjenne bytter</div>
-          <div class="sub">Av: det holder at den andre sier ja.</div></div>
+        <div class="grow"><div class="nm">Jeg godkjenner bytter</div>
+          <div class="sub">${S.trip.romGodkjenn ? "Et bytte gjelder først når du har sagt ja." : "Det holder at begge som bytter sier ja."}</div></div>
         <input type="checkbox" class="bryter" data-romgodkjenn="1" ${S.trip.romGodkjenn ? "checked" : ""}></label>
     </div></div>`;
   }
@@ -4357,7 +4562,7 @@ const UI = (() => {
     if (!rader.length) return "";
     return `<div>
       <div class="eyebrow" style="margin-bottom:8px;color:var(--amber)">Bytter · ${rader.length}</div>
-      <div class="card pad" style="border-left:3px solid var(--amber)">
+      <div class="card pad" style="border-color:color-mix(in srgb, var(--amber) 45%, var(--line))">
         ${rader.map(r => `<div class="bytterad">
           <div class="nm">${r.hva}</div>
           <div class="sub">${r.under}</div>
@@ -4502,9 +4707,9 @@ const UI = (() => {
 
       ${mangler.length ? `<div>
         <div class="eyebrow" style="margin-bottom:8px;color:var(--amber)">Mangler · ${mangler.length}</div>
-        <div class="card pad" style="border-left:3px solid var(--amber)">
+        <div class="card pad" style="border-color:color-mix(in srgb, var(--amber) 45%, var(--line))">
           <div class="memberlist opprop">${mangler.map(rad).join("")}</div>
-        </div></div>` : `<div class="card pad" style="border-left:3px solid var(--moss)">
+        </div></div>` : `<div class="card pad" style="border-color:color-mix(in srgb, var(--moss) 45%, var(--line))">
           <p class="muted" style="margin:0">Alle er med.</p></div>`}
 
       ${her.length ? `<div>
@@ -4624,6 +4829,13 @@ const UI = (() => {
     const plass = plassnavn(k, nr);
     const paa = k.seter.find(s2 => s2.nr === nr);
     const hvor = new Map(k.seter.map(s2 => [s2.id, plassnavn(k, s2.nr)]));
+    // Sitter personen i et kjøretøy som kjører samtidig, står det også,
+    // så du ser at hen blir flyttet hit.
+    const n = Api.samtidigNokkel(k);
+    for (const x of S.setekart.kjoretoy) {
+      if (x.id === k.id || Api.samtidigNokkel(x) !== n) continue;
+      for (const s2 of x.seter) if (!hvor.has(s2.id)) hvor.set(s2.id, `${plassnavn(x, s2.nr)} i ${x.navn}`);
+    }
     openSheet(`<h3>${plass} i ${esc(k.navn)}</h3>
       <p class="lede">${paa ? `${esc(paa.hvem)} sitter her nå.` : "Plassen er ledig."}</p>
       <div class="memberlist">${S.setekart.alle.map(p => `<div class="person">
@@ -4832,12 +5044,15 @@ const UI = (() => {
     if (!k) return;
     const rader = k.seter.map(s2 => ({ plass: plassnavn(k, s2.nr), nr: s2.nr, navn: s2.hvem || "" }))
       .sort((a, b) => etter === "navn" ? a.navn.localeCompare(b.navn, "nb") : a.nr - b.nr);
-    openSheet(`<h3>${esc(k.navn)}</h3>
+    // Sortering etter navn er for å finne én person i en full buss. I en
+    // bil med tre stykker er den bare et valg til å forstå.
+    const sortering = k.seter.length > 8 ? `<div class="segment" role="tablist" aria-label="Sorter">
+        <button role="tab" aria-selected="${etter !== "navn"}" data-seteliste="${esc(k.id)}" data-etter="plass">Etter plass</button>
+        <button role="tab" aria-selected="${etter === "navn"}" data-seteliste="${esc(k.id)}" data-etter="navn">Etter navn</button>
+      </div>` : "";
+    openSheet(`<h3>Hvem sitter hvor i ${esc(k.navn)}</h3>
       <p class="lede">${k.seter.length} av ${k.plasser} plasser er tatt.</p>
-      <div style="display:flex;gap:8px;margin-bottom:12px">
-        <button class="btn${etter === "navn" ? "" : " primary"}" data-seteliste="${esc(k.id)}" data-etter="plass">Etter plass</button>
-        <button class="btn${etter === "navn" ? " primary" : ""}" data-seteliste="${esc(k.id)}" data-etter="navn">Etter navn</button>
-      </div>
+      ${sortering}
       <div class="memberlist">${rader.map(r => `<div class="person"><span><b class="mono">${esc(r.plass)}</b></span>
         <span>${esc(r.navn)}</span></div>`).join("") || '<p class="muted" style="padding:10px">Ingen har plass ennå.</p>'}</div>
       <button class="btn close" data-close>Lukk</button>`);
@@ -4948,7 +5163,46 @@ const UI = (() => {
     linjer.push("END:VCALENDAR");
     return linjer.map(brett).join("\r\n") + "\r\n";
   }
+  /* I iOS-appen går programmet rett inn i Kalender, og Kalender åpnes på
+     første dag. Trykker du igjen etter en endring, oppdateres de samme
+     hendelsene i stedet for å legges inn på nytt (KalenderPlugin.swift). */
+  async function leggIKalenderNativt() {
+    const plugin = nativPlugin("Kalender");
+    if (!plugin) return false;
+    const t = S.trip;
+    const hendelser = [];
+    for (const d of t.days) for (const i of d.items) {
+      if (!i.t) continue;
+      const p = i.place ? t.places[i.place] : null;
+      const s = slutt(i);
+      hendelser.push({
+        id: String(i.id), tittel: i.title,
+        start: d.date + "T" + i.t,
+        slutt: s && minutt(s) > minutt(i.t) ? d.date + "T" + s : null,
+        sted: p ? [p.name, p.addr].filter(Boolean).join(", ") : null,
+        notat: i.note || null
+      });
+    }
+    if (!hendelser.length) { toast("Programmet har ingen punkter med klokkeslett ennå."); return true; }
+    try {
+      const r = await plugin.leggInn({ tur: String(t.id), hendelser });
+      const deler = [];
+      if (r.lagtTil) deler.push(r.lagtTil === 1 ? "1 punkt lagt inn" : r.lagtTil + " punkter lagt inn");
+      if (r.endret) deler.push(r.endret + " oppdatert");
+      if (r.fjernet) deler.push(r.fjernet + " fjernet");
+      toast(deler.length ? deler.join(", ") + "." : "Kalenderen er allerede oppdatert.");
+    } catch (e) {
+      if (e && e.code === "NEKTET") {
+        melding("TripMate har ikke lov til å bruke kalenderen.\n\nSlå det på i Innstillinger → Apper → TripMate → Kalendere.");
+      } else {
+        toast("Klarte ikke legge programmet i kalenderen.");
+      }
+    }
+    return true;
+  }
+
   async function delKalender() {
+    if (erNativ() && await leggIKalenderNativt()) return;
     const ics = lagKalender();
     if (!/BEGIN:VEVENT/.test(ics)) return toast("Programmet har ingen punkter med klokkeslett ennå.");
     const navn = (S.trip.name.replace(/[^\p{L}\p{N} -]/gu, "").trim() || "tur") + ".ics";
@@ -5109,6 +5363,15 @@ const UI = (() => {
     if (!steg) { lag.hidden = true; return; }
 
     const liste = OMVISNING[S.omvis.rolle];
+    // Et steg som peker på noe som ikke finnes på denne turen (et tomt
+    // program har ingen «nå»-boks), hoppes over i den retningen du går.
+    // Før forklarte omvisningen en boks som ikke var der.
+    if (steg.maal && !($("screen").querySelector(steg.maal) || document.querySelector(steg.maal))) {
+      const r = S.omvis.retning || 1;
+      const neste = S.omvis.i + r;
+      if (neste < 0) { S.omvis.retning = 1; return gaaTilOmvisSteg(S.omvis.i + 1); }
+      return gaaTilOmvisSteg(neste);
+    }
     const siste = S.omvis.i === liste.length - 1;
     lag.hidden = false;
 
@@ -5253,12 +5516,35 @@ const UI = (() => {
           </div>
           <p class="muted" style="margin:-6px 0 14px;font-size:13px">Sju biler: skriv «Bil» og 7.
             Du får Bil 1 til Bil 7, alle med samme oppsett.</p>`}
+        ${k ? `<div class="gruppe" style="margin-bottom:14px"><div class="list">
+          <label class="listrow" style="cursor:pointer">
+            <div class="grow"><div class="nm">Deltakerne velger selv</div>
+              <div class="sub" id="kjFrittTekst"></div></div>
+            <input type="checkbox" class="bryter" id="kjFritt" ${k.fritt ? "checked" : ""}></label>
+          <label class="listrow" style="cursor:pointer">
+            <div class="grow"><div class="nm">Jeg godkjenner bytter</div>
+              <div class="sub" id="kjGodkjennTekst"></div></div>
+            <input type="checkbox" class="bryter" id="kjGodkjenn" ${k.godkjenn ? "checked" : ""}></label>
+        </div></div>` : ""}
         <p class="err" id="kjErr" hidden></p>
         <button class="btn primary big" type="submit" id="kjLagre">Lagre</button>
       </form>
       ${k ? `<button class="btn danger" style="width:100%;margin-top:10px"
         data-slettkj="${esc(k.id)}">Slett kjøretøyet</button>` : ""}
       <button class="btn close" data-close>Avbryt</button>`);
+
+    // Teksten under bryteren sier hva som gjelder nå, ikke hva «av» betyr.
+    // «Av: du setter hvem som sitter hvor» under en bryter som sto på,
+    // var umulig å lese.
+    const forklar = () => {
+      if (!$("kjFritt")) return;
+      $("kjFrittTekst").textContent = $("kjFritt").checked
+        ? "Hver deltaker trykker på en ledig plass." : "Du setter hvem som sitter hvor.";
+      $("kjGodkjennTekst").textContent = $("kjGodkjenn").checked
+        ? "Et bytte gjelder først når du har sagt ja." : "Det holder at begge som bytter sier ja.";
+    };
+    forklar();
+    if ($("kjFritt")) { $("kjFritt").addEventListener("change", forklar); $("kjGodkjenn").addEventListener("change", forklar); }
 
     $("kjForm").addEventListener("submit", async e => {
       e.preventDefault();
@@ -5280,8 +5566,11 @@ const UI = (() => {
       };
       btn.disabled = true; btn.textContent = "Lagrer…";
       try {
-        if (k) await Api.endreKjoretoy(k.id, felter);
-        else await Api.nyttKjoretoy(S.trip.id, Object.assign({ antall }, felter));
+        if (k) {
+          await Api.endreKjoretoy(k.id, felter);
+          const fritt = $("kjFritt").checked, godkjenn = $("kjGodkjenn").checked;
+          if (fritt !== k.fritt || godkjenn !== k.godkjenn) await Api.settKjoretoyvalg(k.id, { fritt, godkjenn });
+        } else await Api.nyttKjoretoy(S.trip.id, Object.assign({ antall }, felter));
         closeSheet();
         await aapneSeter(true);
         hentMegTall(true);
@@ -5700,7 +5989,7 @@ const UI = (() => {
       : st === null
       ? venter("Sjekker")
       : iOS && !paaHjem
-      ? `<div class="card pad" style="padding-block:14px;border-left:3px solid var(--amber)">
+      ? `<div class="card pad" style="padding-block:14px;border-color:color-mix(in srgb, var(--amber) 45%, var(--line))">
            <b style="font-family:"DM Sans",sans-serif;font-size:14px">Legg appen på hjemskjermen først</b>
            <p style="margin:7px 0 0;font-size:13.5px;color:var(--ink-2)">
              På iPhone kan bare apper som ligger på hjemskjermen gi varsler — det er Apple som
@@ -5711,7 +6000,7 @@ const UI = (() => {
       ? `<div class="card pad" style="padding-block:14px">
            <p class="muted" style="margin:0">Denne nettleseren kan ikke vise varsler.</p></div>`
       : st === "avslaatt"
-      ? `<div class="card pad" style="padding-block:14px;border-left:3px solid var(--amber)">
+      ? `<div class="card pad" style="padding-block:14px;border-color:color-mix(in srgb, var(--amber) 45%, var(--line))">
            <b style="font-family:"DM Sans",sans-serif;font-size:14px">Varsler er blokkert</b>
            <p style="margin:7px 0 0;font-size:13.5px;color:var(--ink-2)">
              Du har sagt nei én gang, og da spør ikke nettleseren igjen. Det må slås på
@@ -6044,6 +6333,7 @@ const UI = (() => {
      anonym identitet (e-post finnes nå) og at man måtte lage en ny tur
      når koden kom på avveie (Ny turkode finnes). */
   const PERSONVERN_URL = "https://tripmateub.github.io/tripmate/personvern.html";
+  const VILKAAR_URL = "https://tripmateub.github.io/tripmate/vilkaar.html";
   function sheetAbout() {
     openSheet(`<h3>Om appen og personvern</h3>
       <p style="margin:10px 0;font-size:14.5px;color:var(--ink-2)">
@@ -6062,6 +6352,7 @@ const UI = (() => {
       <p class="muted" style="margin-top:12px">Turkoden slipper folk inn på turen. Del den bare med dem som skal være med.
         Kommer den på avveie, kan reiselederen lage en ny under Turen.</p>
       <a class="btn" style="width:100%;margin-top:6px" href="${PERSONVERN_URL}" target="_blank" rel="noopener">Les personvernerklæringen</a>
+      <a class="btn" style="width:100%;margin-top:6px" href="${VILKAAR_URL}" target="_blank" rel="noopener">Les vilkårene</a>
       <button class="btn close" data-close>Lukk</button>`);
   }
 
@@ -6113,7 +6404,7 @@ const UI = (() => {
   });
 
   document.addEventListener("click", async e => {
-    const t = e.target.closest("[data-tab],[data-side],[data-pakk],[data-slettpakk],[data-sete],[data-setevalg],[data-nykj],[data-endrekj],[data-slettkj],[data-vaerigjen],[data-svarbytte],[data-avgjorbytte],[data-trekkbytte],[data-nyttrom],[data-endrerom],[data-slettrom],[data-fyllrom],[data-fyllalle],[data-settrom],[data-romvalg],[data-utavrom],[data-bytterom],[data-svarrombytte],[data-avgjorrombytte],[data-trekkrombytte],[data-nykontakt],[data-endrekontakt],[data-slettkontakt],[data-nyttopprop],[data-hake],[data-lukkopprop],[data-omvis],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-iprog],[data-taned],[data-romliste],[data-angrerom],[data-fjernres],[data-rettnavn],[data-utsett],[data-startopprop],[data-seteliste],[data-fyllseter],[data-kalender],[data-aapnedok],[data-slettdok],[data-soktreff],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-msgmeny],[data-chat],[data-paa],[data-slettchat],[data-bilde],[data-slettbilde],[data-bvlukk],[data-bvmeny],[data-lagrebilde],[data-kopimeld],[data-deltekst],[data-chatside],[data-cmadd],[data-cmdel],[data-cmleave],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn,#skjulInstall,#installKnapp");
+    const t = e.target.closest("[data-tab],[data-side],[data-pakk],[data-slettpakk],[data-sete],[data-setevalg],[data-nykj],[data-endrekj],[data-slettkj],[data-vaerigjen],[data-svarbytte],[data-avgjorbytte],[data-trekkbytte],[data-nyttrom],[data-endrerom],[data-slettrom],[data-fyllrom],[data-fyllalle],[data-settrom],[data-romvalg],[data-utavrom],[data-bytterom],[data-svarrombytte],[data-avgjorrombytte],[data-trekkrombytte],[data-nykontakt],[data-endrekontakt],[data-slettkontakt],[data-nyttopprop],[data-hake],[data-lukkopprop],[data-omvis],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-iprog],[data-taned],[data-romliste],[data-angrerom],[data-fjernres],[data-rettnavn],[data-utsett],[data-startopprop],[data-seteliste],[data-fyllseter],[data-kalender],[data-aapnedok],[data-slettdok],[data-soktreff],[data-delitem],[data-delday],[data-delmsg],[data-rapporter],[data-blokker],[data-opphevblokk],[data-rappslett],[data-rappfjern],[data-rappferdig],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-msgmeny],[data-chat],[data-paa],[data-slettchat],[data-bilde],[data-slettbilde],[data-bvlukk],[data-bvmeny],[data-lagrebilde],[data-kopimeld],[data-deltekst],[data-chatside],[data-cmadd],[data-cmdel],[data-cmleave],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn,#skjulInstall,#installKnapp");
     if (!t) return;
 
     if (t.id === "joinTilbake") { S.fraStart = false; return visAuth("start"); }
@@ -6241,6 +6532,15 @@ const UI = (() => {
           if (!await bekreft(`Slippe ${navn} i ${k.navn}?`)) return;
           await Api.slippSete(k.id);
         } else if (k.fritt && !paa) {
+          // Sitter du i et kjøretøy som kjører samtidig, flytter du deg.
+          // Basen slipper den gamle plassen i samme operasjon.
+          const n = Api.samtidigNokkel(k);
+          const annen = S.setekart.kjoretoy.find(x => x.id !== k.id && Api.samtidigNokkel(x) === n && x.seter.some(y => y.meg));
+          if (annen) {
+            const gammel = annen.seter.find(y => y.meg);
+            if (!await bekreft(`Du sitter på ${plassOmtale(gammel.nr, annen)} i ${annen.navn}. Flytte deg til ${navn} i ${k.navn}?`,
+              { ja: "Flytt meg", fare: false })) return;
+          }
           await Api.taSete(k.id, nr);
         } else {
           // Noen sitter der, eller reiselederen fordeler: da spør man.
@@ -6364,7 +6664,8 @@ const UI = (() => {
       const v = t.dataset.omvis;
       if (v === "slutt") return avsluttOmvisning();
       if (!S.omvis) return;
-      return gaaTilOmvisSteg(S.omvis.i + (v === "forrige" ? -1 : 1));
+      S.omvis.retning = v === "forrige" ? -1 : 1;
+      return gaaTilOmvisSteg(S.omvis.i + S.omvis.retning);
     }
 
     // ───── nødnummer ─────
@@ -6657,6 +6958,33 @@ const UI = (() => {
     if (t.dataset.kartlukk) return settKart(t.dataset.kartlukk, "liten");
     if (t.dataset.emoji) { closeSheet(); return reager(t.dataset.pa, t.dataset.emoji); }
     if (t.dataset.msgmeny) return sheetEmoji(t.dataset.msgmeny);
+    if (t.dataset.rapporter) return sheetRapporter(t.dataset.rapporter);
+    if (t.dataset.blokker) return blokkerPerson(t.dataset.blokker, t.dataset.navn || "personen");
+    if (t.dataset.opphevblokk) {
+      try { await Api.opphevBlokk(t.dataset.opphevblokk); sheetBlokkerte(); render(); }
+      catch { toast("Klarte ikke oppheve. Sjekk nettet og prøv igjen."); }
+      return;
+    }
+    if (t.dataset.rappslett || t.dataset.rappfjern || t.dataset.rappferdig) {
+      const id = t.dataset.rappslett || t.dataset.rappfjern || t.dataset.rappferdig;
+      const r = (S.rapporter || []).find(x => x.id === id);
+      if (!r) return;
+      try {
+        if (t.dataset.rappslett) {
+          if (!await bekreft("Slette meldingen for alle?", { ja: "Slett" })) return sheetRapportliste();
+          await Api.slettMeldingMedId(r.messageId);
+        } else if (t.dataset.rappfjern) {
+          if (!await bekreft(`Ta ${r.navn || "personen"} ut av turen? Hen mister tilgangen med en gang.`, { ja: "Ta ut", fare: true })) return sheetRapportliste();
+          await Api.fjernDeltaker(S.trip.id, r.gjelder);
+        }
+        await Api.behandleRapport(r.id);
+        S.rapporter = (S.rapporter || []).filter(x => x.id !== r.id);
+        toast("Rapporten er behandlet.");
+        if (S.rapporter.length) sheetRapportliste(); else closeSheet();
+        render();
+      } catch (err) { toast(err && err.kjent ? err.message : "Klarte ikke. Sjekk nettet og prøv igjen."); }
+      return;
+    }
     if (t.dataset.hopp) return hoppTil(t.dataset.hopp);
     if (t.dataset.svar) { closeSheet(); lukkBilde(); return startSvar(t.dataset.svar); }
     if (t.dataset.item) return sheetItem(t.dataset.item);
@@ -6689,6 +7017,8 @@ const UI = (() => {
     if (t.dataset.sheet === "koblepost") { closeSheet(); return visAuth("koble"); }
     if (t.dataset.sheet === "nyttpakk") return sheetNyttPakk(t.dataset.egen === "1");
     if (t.dataset.sheet === "skjulte") return sheetSkjulte();
+    if (t.dataset.sheet === "rapporter") return sheetRapportliste();
+    if (t.dataset.sheet === "blokkerte") return sheetBlokkerte();
     if (t.dataset.sheet === "about") return sheetAbout();
     if (t.dataset.sheet === "importpdf") return sheetImportPdf();
 
@@ -6948,6 +7278,21 @@ const UI = (() => {
     skjerm.addEventListener("touchcancel", slipp);
   }
   settOppSveip();
+
+  /* ───────────────── toppen krymper når du blar ─────────────────
+     Slik store titler i iOS gjør: øverst står turen med gruppa under.
+     Blar du ned, blir tittelen mindre, gruppa glir bort, og streken
+     under toppen kommer først når noe faktisk ligger under den. To
+     terskler, så den ikke blafrer når du står og vipper rundt én. */
+  var toppLiten = false;   // var: render() kan kalle sjekkTopp før denne linja har kjørt
+  function sjekkTopp() {
+    const y = $("screen").scrollTop;
+    const ny = toppLiten ? y > 4 : y > 28;
+    if (ny === toppLiten) return;
+    toppLiten = ny;
+    $("apphead").classList.toggle("liten", ny);
+  }
+  $("screen").addEventListener("scroll", sjekkTopp, { passive: true });
 
   /* Snur telefonen seg, eller kommer tastaturet opp, flytter øya seg —
      og da stemmer ikke plassen under lista lenger. */

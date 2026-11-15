@@ -10,7 +10,7 @@
    endrer noe, så får alle den nye versjonen: nye filadresser går utenom
    både service workeren og nettleserens eget mellomlager. */
 
-const BUILD = 110;
+const BUILD = 113;
 const CACHE = "tripmate-b" + BUILD;
 const MAALCACHE = "tripmate-maal";   // chatten et varsel peker til
 
@@ -28,7 +28,8 @@ const SHELL = [
   "js/templates.js?v=" + BUILD,
   "js/api.js?v=" + BUILD,
   "js/parse.js?v=" + BUILD,
-  "js/ui.js?v=" + BUILD
+  "js/ui.js?v=" + BUILD,
+  "js/native.js?v=" + BUILD
 ];
 
 self.addEventListener("install", e => {

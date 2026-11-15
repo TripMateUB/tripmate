@@ -54,7 +54,8 @@ const Api = (() => {
   function datoSpenn(fra, til) {
     if (!fra) return "";
     const d1 = new Date(fra + "T12:00:00"), d2 = new Date((til || fra) + "T12:00:00");
-    const dag = d => d.toLocaleDateString("nb-NO", { day: "numeric" });
+    // getDate, ikke toLocaleDateString: Safari skriver «13.» med punktum, Chrome «13».
+    const dag = d => d.getDate();
     const full = d => d.toLocaleDateString("nb-NO", { day: "numeric", month: "long" });
     if (fra === til) return full(d1);
     if (d1.getMonth() === d2.getMonth()) return `${dag(d1)}.–${full(d2)}`;
@@ -397,7 +398,66 @@ const Api = (() => {
   function onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); }
   function fire(hendelse) { listeners.forEach(f => { try { f(hendelse); } catch {} }); }
 
-  function messages(channelId) { return cache.messages[channelId] || []; }
+  /* Meldinger fra folk du har blokkert, vises ikke (utvidelse-33). */
+  function messages(channelId) {
+    const liste = cache.messages[channelId] || [];
+    return blokkerte.size ? liste.filter(m => !blokkerte.has(m.authorId)) : liste;
+  }
+
+  /* ───────── blokkere og rapportere ─────────
+     Apple krever begge deler i apper der brukerne lager innhold (1.2).
+     Blokkeringen gjelder deg og alle turene dine; den andre får ikke vite
+     det. En rapport går til reiselederne, som ikke ser hvem som sendte den. */
+  let blokkerte = new Map();          // user_id → navn
+  async function lastBlokkerte() {
+    if (!online()) return;
+    const { data, error } = await sb.from("blokkert").select("blokkert, navn");
+    if (error) return;                // tabellen finnes ikke ennå: ingen blokkerte
+    blokkerte = new Map((data || []).map(r => [r.blokkert, r.navn || ""]));
+  }
+  const blokkertListe = () => Array.from(blokkerte, ([id, navn]) => ({ id, navn }));
+  async function blokker(brukerId, navn) {
+    const { error } = await sb.from("blokkert").insert({ blokkert: brukerId, navn: String(navn || "").slice(0, 120) });
+    if (error && error.code !== "23505") throw friendly(error);
+    blokkerte.set(brukerId, navn || "");
+    fire();
+  }
+  async function opphevBlokk(brukerId) {
+    const { error } = await sb.from("blokkert").delete().eq("blokkert", brukerId);
+    if (error) throw friendly(error);
+    blokkerte.delete(brukerId);
+    fire();
+  }
+  async function rapporter({ tripId, messageId, gjelder, gjelderNavn, grunn, utdrag }) {
+    const { error } = await sb.from("rapporter").insert({
+      trip_id: tripId, message_id: messageId || null, gjelder,
+      gjelder_navn: String(gjelderNavn || "").slice(0, 120),
+      grunn: String(grunn).slice(0, 500), utdrag: String(utdrag || "").slice(0, 500)
+    });
+    if (error) throw friendly(error);
+  }
+  async function rapportListe(tripId) {
+    const { data, error } = await sb.rpc("rapporter_for_ledere", { p_trip: tripId });
+    if (error) return [];
+    return (data || []).map(r => ({
+      id: r.id, messageId: r.message_id, gjelder: r.gjelder, navn: r.gjelder_navn,
+      megSelv: r.gjelder === userId,
+      grunn: r.grunn, utdrag: r.utdrag, ts: r.created_at
+    }));
+  }
+  async function behandleRapport(id) {
+    const { error } = await sb.rpc("behandle_rapport", { p_id: id });
+    if (error) throw friendly(error);
+  }
+  async function slettMeldingMedId(id) {
+    const { error } = await sb.from("messages").delete().eq("id", id);
+    if (error) throw friendly(error);
+    for (const k of Object.keys(cache.messages)) {
+      const i = cache.messages[k].findIndex(m => m.id === id);
+      if (i > -1) cache.messages[k].splice(i, 1);
+    }
+    fire();
+  }
 
   /* Siste melding i hver chat — det chatlista viser under navnet. */
   function lastByChannel() { return cache.recent || {}; }
@@ -455,6 +515,7 @@ const Api = (() => {
     if (error) throw error;
     const map = {};
     for (const m of (data || [])) {
+      if (m.author_id && blokkerte.has(m.author_id)) continue;
       if (!map[m.channel_id]) {
         map[m.channel_id] = { txt: m.txt, who: m.author_name, ts: m.created_at, mine: m.author_id === userId };
       }
@@ -502,7 +563,7 @@ const Api = (() => {
   }
 
   const shape = m => ({
-    id: m.id, who: m.author_name, role: m.role, txt: m.txt,
+    id: m.id, who: m.author_name, authorId: m.author_id, role: m.role, txt: m.txt,
     ts: m.created_at, action: m.action || null, mine: m.author_id === userId,
     replyTo: m.reply_to || null, bilde: m.bilde || null,
     // Utvidelse 29: meldingen er lagt inn i programmet (punktets id).
@@ -617,6 +678,11 @@ const Api = (() => {
   }
 
   function nyMelding(m) {
+    if (blokkerte.has(m.author_id)) {
+      const l = cache.messages[m.channel_id];
+      if (l && !l.some(x => x.id === m.id)) l.push(shape(m));
+      return;                         // ingen forhåndsvisning eller varsel
+    }
     const list = cache.messages[m.channel_id];
     if (list && !list.some(x => x.id === m.id)) {
       list.push(shape(m));
@@ -867,6 +933,14 @@ const Api = (() => {
     // En omsortering lagrer hvert punkt for seg. Det er én endring, ikke
     // ti, så kallene samles først i halvannet sekund.
     programVarselTimer = setTimeout(async () => {
+      // Er du alene på turen, er det ingen å varsle, og nedtellingen ville
+      // bare stått der og lovet noe som ikke skjer.
+      try {
+        const { count, error } = await sb.from("members")
+          .select("user_id", { count: "exact", head: true })
+          .eq("trip_id", tripId).eq("status", "approved").neq("role", "admin").neq("user_id", userId);
+        if (!error && count === 0) return;
+      } catch { /* vet vi ikke, varsler vi som før */ }
       fire({ programVarsel: { tripId, sekunder: VARSEL_SEKUNDER } });
       try { await kallVarsle({ program: { tripId, dato, nr: nyId() } }); }
       catch { /* programmet er endret uansett */ }
@@ -1469,6 +1543,28 @@ const Api = (() => {
     return offlineTaalt(tripId, "seter", () => hentSetekart(tripId));
   }
 
+  /* Kjøretøy som kjører samtidig: samme dag (eller begge «hele turen»)
+     og samme slag. Bil 1 og Bil 2 til stadion er to valg for samme tur —
+     du sitter i én av dem. Buss til flyplassen og fly samme dag er to
+     etapper etter hverandre, og da har du plass i begge. «Annet» kan være
+     hva som helst, så det regnes aldri som samtidig med noe.
+     Samme regel ligger i basen (utvidelse-32.sql), så den ikke kan omgås. */
+  const SLAG = { buss: "vei", minibuss: "vei", bil: "vei", tog: "tog" };
+  function samtidigNokkel(k) {
+    return SLAG[k.typ] ? (k.dato || "hele") + "|" + SLAG[k.typ] : "eget|" + k.id;
+  }
+  /* Kjøretøyene samlet i grupper som kjører samtidig, i den rekkefølgen
+     de står. Hver gruppe er én reise du trenger én plass på. */
+  function samtidigGrupper(kart) {
+    const grupper = new Map();
+    for (const k of kart) {
+      const n = samtidigNokkel(k);
+      if (!grupper.has(n)) grupper.set(n, { nokkel: n, dato: k.dato || null, slag: SLAG[k.typ] || null, kart: [] });
+      grupper.get(n).kart.push(k);
+    }
+    return Array.from(grupper.values());
+  }
+
   /* Kolonnelista nevner dato og bakerst ved navn. Mangler de — basen er
      ikke oppdatert ennå — svarer PostgREST med feil på hele spørringen,
      og da hentes kjøretøyene om igjen uten dem. Ett ekstra kall den ene
@@ -1899,7 +1995,7 @@ const Api = (() => {
       sb.from("pakk_kryss").select("pakk_id, pakk!inner(trip_id)", { count: "exact", head: true })
         .eq("pakk.trip_id", tripId),
       sb.from("pakk_egen").select("kryss").eq("trip_id", tripId),
-      sb.from("kjoretoy").select("id, navn, typ, plasser, bakerst").eq("trip_id", tripId),
+      hentKjoretoy(tripId),
       sb.from("rom").select("id", { count: "exact", head: true }).eq("trip_id", tripId),
       sb.from("rom_plass").select("rom_id").eq("trip_id", tripId).eq("user_id", userId),
       // Det som venter på et svar fra deg. Reiselederen får i tillegg de
@@ -1941,6 +2037,15 @@ const Api = (() => {
       rom: rom.count || 0,
       harRom: Boolean(mittRom.data && mittRom.data.length),
       romNavn: (romRad.data && romRad.data.navn) || null,
+      // Én rad per reise (kjøretøy som kjører samtidig, se samtidigGrupper):
+      // har du plass der, og kan du velge den selv?
+      seteGrupper: samtidigGrupper(kjoretoyListe.map(k => ({
+        id: k.id, typ: k.typ, dato: k.dato || null, fritt: k.fritt !== false
+      }))).map(g => ({
+        dato: g.dato, slag: g.slag,
+        fritt: g.kart.some(k => k.fritt),
+        harPlass: g.kart.some(k => (mine.data || []).some(x => x.kjoretoy_id === k.id))
+      })),
       mineSeterListe: (mine.data || []).map(x => {
         const k = kjoretoyListe.find(y => y.id === x.kjoretoy_id);
         return k ? { nr: x.nr, k: { typ: k.typ, plasser: k.plasser, bakerst: k.bakerst || 0, navn: k.navn } } : null;
@@ -2510,6 +2615,8 @@ const Api = (() => {
   }
 
   return {
+    samtidigNokkel, samtidigGrupper,
+    lastBlokkerte, blokkertListe, blokker, opphevBlokk, rapporter, rapportListe, behandleRapport, slettMeldingMedId,
     fyllSeter, dokumenter, lastOppDokument, dokumentAdresse, slettDokument, sokMeldinger,
     endreNavn, rettNavn, setSeterFritt, settPaaroerende, minPaaroerende, lagrePaaroerende, slettPaaroerende,
     paaroerendeListe, lagreRomliste, mineRomforslag, bekreftRomplass, avvisRomforslag, angreRomplass,

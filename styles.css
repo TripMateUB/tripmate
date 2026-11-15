@@ -110,8 +110,19 @@ button,input,select,textarea{font:inherit;color:inherit}
 @media (max-width:600px){.app{border-inline:0}}
 .apphead{
   display:flex;align-items:center;justify-content:space-between;gap:10px;flex:none;
-  padding:calc(10px + env(safe-area-inset-top,0px)) 16px 10px;border-bottom:1px solid var(--line-soft);background:var(--surface);
+  padding:calc(10px + env(safe-area-inset-top,0px)) 16px 10px;border-bottom:1px solid transparent;background:var(--surface);
+  transition:padding .22s var(--ease-ut),border-color .22s ease;
 }
+/* Blar du ned, krymper toppen (sjekkTopp i ui.js). */
+.apphead.liten{padding-bottom:6px;border-bottom-color:var(--line-soft)}
+.apphead .tripname{transition:font-size .22s var(--ease-ut)}
+.apphead .tripsub{transition:max-height .22s var(--ease-ut),opacity .16s ease;max-height:20px}
+.apphead.liten .tripname{font-size:16px}
+.apphead.liten .tripsub{max-height:0;opacity:0}
+.apphead .avatar > span{transition:width .22s var(--ease-ut),height .22s var(--ease-ut),font-size .22s var(--ease-ut)}
+.apphead.liten .avatar{height:36px}
+.apphead.liten .avatar > span{width:32px;height:32px;font-size:12.5px}
+@media (prefers-reduced-motion:reduce){.apphead,.apphead *{transition:none !important}}
 .hodemerke{width:22px;height:22px;flex:none;display:block}
 .hodemerke svg{width:100%;height:100%;fill:none;stroke:var(--ink);stroke-width:2.9;stroke-linecap:round;stroke-linejoin:round}
 .hodemerke circle{fill:var(--merke);stroke:none}
@@ -352,7 +363,7 @@ button:active{transform:scale(.97)}
 .sheetbilde{margin:4px 0 12px;border-radius:12px;overflow:hidden;background:var(--surface-2)}
 .sheetbilde img{display:block;width:100%;max-height:34vh;object-fit:contain}
 
-.aicard{margin-top:8px;border:1px solid var(--line);border-left:3px solid var(--amber);border-radius:12px;
+.aicard{margin-top:8px;border:1px solid color-mix(in srgb, var(--amber) 45%, var(--line));border-radius:12px;
   background:var(--surface);padding:12px;width:100%}
 .aicard .hd{display:flex;align-items:center;gap:6px;margin-bottom:8px}
 .aicard .hd svg{width:15px;height:15px;stroke:var(--amber);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
@@ -405,13 +416,19 @@ button:active{transform:scale(.97)}
 .stack{display:flex;flex-direction:column;gap:10px}
 
 /* ---------- sheet ---------- */
-.sheet-bg{position:fixed;inset:0;background:rgba(9,15,22,.5);display:flex;align-items:flex-end;justify-content:center;z-index:20}
+.sheet-bg{position:fixed;inset:0;background:rgba(9,15,22,.5);display:flex;align-items:flex-end;justify-content:center;z-index:20;
+  /* Arket skal aldri gli opp under klokka og batteriet. I iOS-appen går
+     siden helt til toppen, og med tastaturet oppe var det akkurat det som
+     skjedde. */
+  padding-top:calc(env(safe-area-inset-top,0px) + 8px)}
 /* Arket er en kolonne: et fast draghåndtak øverst, og innholdet som
    skroller under det. Tidligere lå håndtaket som et lag oppå innholdet,
    så overskriften ble borte under det — og siden arket da aldri sto helt
    på toppen, slo ikke dra-ned inn heller. */
 .sheet{width:100%;max-width:560px;background:var(--surface);border-radius:20px 20px 0 0;
   max-height:86dvh;display:flex;flex-direction:column;overflow:hidden;animation:up .18s ease-out}
+/* dvh krymper ikke når tastaturet kommer opp, men --app-h gjør det. */
+.sheet{max-height:min(86dvh, calc(var(--app-h, 100dvh) - env(safe-area-inset-top,0px) - 8px))}
 /* Arket skroller opp og ned, aldri til siden. Stakk noe litt utenfor —
    et klokkeslettfelt som tok seg til rette — kunne hele skjemaet dras
    sidelengs, og det så ut som appen hadde løsnet. */
@@ -420,6 +437,13 @@ button:active{transform:scale(.97)}
 /* Safari gir klokkeslett- og datofelt en egen bredde som ikke bryr seg om
    boksen de står i. Her holder de seg innenfor. */
 input[type="time"],input[type="date"]{width:100%;max-width:100%;min-width:0}
+/* I iOS-appen (WKWebView) holdt ikke det over: feltet beholdt sin egen
+   bredde og stakk ut på høyre side. Uten den innebygde drakten og som
+   blokk følger det boksen, og tiden står til venstre som i de andre
+   feltene. */
+input[type="time"],input[type="date"]{-webkit-appearance:none;appearance:none;display:block}
+input[type="time"]::-webkit-date-and-time-value,
+input[type="date"]::-webkit-date-and-time-value{text-align:left;margin:0}
 @keyframes up{from{transform:translateY(14px)}to{transform:none}}
 .sheet .grab{width:38px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 16px}
 .sheet h3{font-size:19px}
@@ -551,7 +575,7 @@ label.person span{flex:1;min-width:0}
 .imptid input{border:1px solid var(--line);background:var(--surface);border-radius:9px;
   padding:9px 11px;font-size:16px;font-family:"DM Sans",sans-serif}
 
-.hotellboks{border:1px solid var(--line);border-left:3px solid var(--amber);border-radius:12px;
+.hotellboks{border:1px solid color-mix(in srgb, var(--amber) 45%, var(--line));border-radius:12px;
   padding:12px;margin-bottom:10px;background:var(--surface)}
 .hotellnavn{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .hotellnavn span{font-family:"DM Sans",sans-serif;font-weight:600;font-size:14.5px;min-width:0;overflow-wrap:anywhere}
@@ -625,9 +649,11 @@ label.person span{flex:1;min-width:0}
 .rea.min{background:var(--blue-soft);border-color:var(--blue)}
 .rea.min span{color:var(--blue-ink)}
 
-.emojirad{display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap}
+/* Seks like ruter på én rad, også på de smaleste telefonene. Med
+   flex-wrap og min-width havnet den sjette alene på en ny linje. */
+.emojirad{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px}
 .emojiknapp{
-  flex:1;min-width:52px;min-height:54px;font-size:26px;cursor:pointer;
+  min-width:0;aspect-ratio:1;max-height:56px;font-size:24px;cursor:pointer;padding:0;
   border:1px solid var(--line);background:var(--surface);border-radius:14px;
 }
 .emojiknapp:active{background:var(--surface-2)}
@@ -957,8 +983,10 @@ label.person span{flex:1;min-width:0}
 
 .kartstripe{
   align-items:center;gap:7px;cursor:pointer;max-width:100%;
-  border:1px solid var(--line);border-left:3px solid var(--amber);
-  background:var(--surface);border-radius:20px;padding:6px 12px 6px 9px;
+  /* Ingen tykk venstrekant her: på en kapsel ble den en brun månesigd
+     langs den runde enden. Nåla i ravgult er merket nok. */
+  border:1px solid color-mix(in srgb, var(--amber) 40%, var(--line));
+  background:var(--surface);border-radius:20px;padding:6px 12px 6px 10px;
   font:inherit;color:var(--ink);text-align:left;min-height:34px;
 }
 .kartstripe svg{width:14px;height:14px;flex:none;stroke:var(--amber);fill:none;stroke-width:1.9}
@@ -973,7 +1001,7 @@ label.person span{flex:1;min-width:0}
 .kartmerke svg{width:14px;height:14px;stroke:var(--amber);fill:none;stroke-width:1.9}
 
 .kartkort{
-  border:1px solid var(--line);border-left:3px solid var(--amber);
+  border:1px solid color-mix(in srgb, var(--amber) 40%, var(--line));
   border-radius:12px;background:var(--surface);padding:11px 12px;
 }
 .kartkorthode{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
@@ -1355,3 +1383,38 @@ details.feilsok summary{cursor:pointer;font-weight:600;color:var(--ink-2);min-he
 .sokfelt{width:100%;min-height:44px;border:1px solid var(--line);border-radius:12px;           /* L12 */
   padding:10px 14px;font:inherit;font-size:15px;background:var(--surface);color:var(--ink);margin-bottom:4px}
 .sokrad{width:100%;text-align:left;background:none;border:0;font:inherit;cursor:pointer;color:inherit}
+
+/* ───────────── iOS-appen (html.nativ, satt av js/native.js) ─────────────
+   Tre ting som avslører en nettside inne i en app:
+   1. Den grå boksen iOS legger over alt du trykker på i en nettside.
+   2. Fokusringen rundt knapper etter et trykk. Den er for tastatur-
+      navigering på datamaskin; VoiceOver har sin egen ring.
+   3. Tekst som kan markeres med langt trykk på knapper og overskrifter.
+   Feltet du skriver i, får i stedet en tydelig kant i samme form som
+   feltet, slik skjemaer i iOS gjør. */
+html.nativ{-webkit-tap-highlight-color:transparent}
+html.nativ :focus-visible{outline:none}
+html.nativ body{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+html.nativ input,html.nativ textarea,html.nativ [contenteditable]{-webkit-user-select:text;user-select:text}
+html.nativ .field input:focus,html.nativ .sheet input:focus,html.nativ .sheet textarea:focus,
+html.nativ .join input:focus{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}
+html.nativ .composer input:focus{border-color:var(--ink-3)}
+
+/* Segmentert valg, slik iOS tegner det: én grå skinne, valgt del hvit
+   med en svak skygge. Brukes der to visninger av det samme byttes. */
+.segment{display:flex;padding:2px;margin:0 0 14px;background:var(--surface-2);border-radius:10px;gap:2px}
+.segment button{flex:1;border:0;background:transparent;border-radius:8px;padding:7px 10px;
+  font-size:14px;font-weight:600;color:var(--ink-2);cursor:pointer;min-height:34px}
+.segment button[aria-selected="true"]{background:var(--surface);color:var(--ink);
+  box-shadow:0 1px 3px rgba(16,53,65,.12),0 0 0 .5px rgba(16,53,65,.06)}
+.segment button:active{transform:none}
+
+/* Linja over kjøretøy som kjører samtidig. */
+.kjhint{margin:0 0 8px;font-size:14px}
+
+/* «Blokker» er en vanlig knapp med rød tekst: den sletter ingenting,
+   men den gjør noe med en annen person. */
+.btn.danger-tekst{color:var(--danger)}
+
+/* Chatreglene: en luftig liste, ikke en tekstvegg. */
+.regler{margin:0 0 14px;padding-left:20px;display:flex;flex-direction:column;gap:8px;color:var(--ink);font-size:15.5px;line-height:1.45}
