@@ -11,7 +11,7 @@ const TEMPLATES = [
   {
     key: "berlin",
     name: "Berlin",
-    org: "Klassetur",
+    org: "Gruppetur",
     startInDays: 14,
     lengthLabel: "5 dager",
     blurb: "To hoteller, bytte til Potsdam underveis — viser hvordan «hotellet» betyr ulike steder ulike dager.",
@@ -71,7 +71,7 @@ const TEMPLATES = [
   {
     key: "paris",
     name: "Paris",
-    org: "Klassetur",
+    org: "Gruppetur",
     startInDays: -1,
     lengthLabel: "7 dager, dag 2 i dag",
     blurb: "Startet i går, så «I dag» har program, dagstripe og neste punkt med én gang. Sju dager, gruppedag, og to gruppechatter.",

@@ -55,6 +55,44 @@
   await last("../js/templates.js");
   await last("../js/parse.js");
   lagApi();
+  /* Nyere deler av api.js (tilgangskoder, blokkering, ventende, rapporter).
+     Det som ikke finnes her, svarer med et tomt løfte i stedet for å
+     krasje, så demoen ikke må følge hver ny funksjon. */
+  const ventere = VALG.has("venter") ? [{ id: "v1", navn: "Sofie Berg" }, { id: "v2", navn: "Ali Hassan" }].slice(0, Number(VALG.get("venter") || 2)) : [];
+  Object.assign(window.Api, {
+    erAnonym: () => false, minEpost: () => "demo@tripmate.no",
+    blokkertListe: () => [], lastBlokkerte: () => Promise.resolve(), blokker: () => Promise.resolve(),
+    ventendeListe: () => Promise.resolve(ventere.slice()),
+    antallVentende: () => Promise.resolve(ventere.length),
+    godkjennDeltaker: (t, id) => { const i = ventere.findIndex(x => x.id === id); if (i >= 0) ventere.splice(i, 1); return Promise.resolve(); },
+    avvisDeltaker: (t, id) => { const i = ventere.findIndex(x => x.id === id); if (i >= 0) ventere.splice(i, 1); return Promise.resolve(); },
+    tripMembers: () => Promise.resolve([
+      { id: "meg", name: "Jonas Robstad", role: "leader", status: "ok", me: true },
+      { id: "u2", name: "Emma Nygård", role: "member", status: "ok" },
+      { id: "u3", name: "Mathias Lund", role: "member", status: "ok" },
+      ...ventere.map(v => ({ id: v.id, name: v.navn, role: "member", status: "pending", venter: true }))
+    ]),
+    paaroerendeListe: () => Promise.resolve(new Map([["u2", { navn: "Per Nygård", telefon: "912 34 567" }]])),
+    minTilgang: () => Promise.resolve({ superadmin: true, koder: [], kanLage: true }),
+    tilgangListe: () => Promise.resolve([
+      { id: "t1", kode: "TM-AB12-CD34", kunde: "Sandnes IL", maksTurer: null, maksDeltakere: 100, gyldigTil: null, aktiv: true, brukt: true, bruktNavn: "Kari Nilsen", turer: 3 },
+      { id: "t2", kode: "TM-EF56-GH78", kunde: "Bryne VGS", maksTurer: 1, maksDeltakere: null, gyldigTil: "2027-06-30", aktiv: true, brukt: false, bruktNavn: null, turer: 0 },
+      { id: "t3", kode: "TM-JK90-LM12", kunde: "Test", maksTurer: 1, maksDeltakere: 3, gyldigTil: null, aktiv: false, brukt: false, bruktNavn: null, turer: 0 }
+    ]),
+    lagTilgang: () => Promise.resolve({ id: "t1", kode: "TM-NY12-KODE" }),
+    rapportListe: () => Promise.resolve([]),
+    byttTurkode: () => Promise.resolve("NY7K2P"),
+    // Samme som i api.js: kjøretøy som kjører samtidig, er én reise.
+    samtidigNokkel: k => { const SL = { buss: "vei", minibuss: "vei", bil: "vei", tog: "tog" };
+      return SL[k.typ] ? (k.dato || "hele") + "|" + SL[k.typ] : "eget|" + k.id; },
+    samtidigGrupper: kart => { const g = new Map(); const SL = { buss: "vei", minibuss: "vei", bil: "vei", tog: "tog" };
+      for (const k of kart) { const n = window.Api.samtidigNokkel(k);
+        if (!g.has(n)) g.set(n, { nokkel: n, dato: k.dato || null, slag: SL[k.typ] || null, kart: [] });
+        g.get(n).kart.push(k); }
+      return Array.from(g.values()); }
+  });
+  const grunnApi = window.Api;
+  window.Api = new Proxy(grunnApi, { get: (t, k) => (k in t ? t[k] : () => Promise.resolve(undefined)) });
   await last("../js/ui.js");
 
   function last(src) {
@@ -117,7 +155,7 @@ let rombytter = [];
 const kontakter = [
   { id: "c1", navn: "Kari Reiseleder", rolle: "Reiseleder", telefon: "+47 900 00 001",
     notat: "Ring denne først", sort: 10 },
-  { id: "c2", navn: "Tryggheim skular", rolle: "Skolen", telefon: "+47 51 79 95 00",
+  { id: "c2", navn: "Kontoret hjemme", rolle: "Hjemme", telefon: "+47 51 79 95 00",
     notat: "", sort: 20 }
 ];
 let oppropRunde = null;
@@ -260,7 +298,9 @@ function lagApi() {
 
   const TUR = {
     id: "demo", code: "DEMO12", name: tpl.name, org: tpl.org,
-    krevGodkjenning: false, bilder: true, venter: false, dates: label,
+    krevGodkjenning: VALG.has("venter"), bilder: true, venter: false, dates: label,
+    maksDeltakere: 40, paaroerende: true,
+    funksjoner: { pakk: true, seter: true, rom: true, dokumenter: true, opprop: true, kontakt: true },
     // ?rolle=deltaker og ?tavle=1 lar sjekkene se appen slik en deltaker
     // ser den, uten en ekte base å sette rollen i.
     role: VALG.get("rolle") === "deltaker" ? "member" : "leader", erAdmin: false, erEier: true,
@@ -331,7 +371,7 @@ function lagApi() {
     subscribeTrip: ingen, subscribeChannel: ingen, unsubscribeChannel: ingen, kobleFra: ingen,
 
     // ── reaksjoner, bilder, vær ──
-    reactions: () => ({}),
+    reactions: () => [],
     toggleReaction: lover(undefined),
     lastReaksjoner: lover(undefined),
     // Et paafunnet, men fast vaer: samme sted og time gir samme svar,

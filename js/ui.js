@@ -120,6 +120,12 @@ const UI = (() => {
     folk:'<svg viewBox="0 0 24 24"><circle cx="9" cy="8.5" r="3.2"/><path d="M3.4 20c.5-3.3 2.8-5.2 5.6-5.2s5.1 1.9 5.6 5.2"/><path d="M16.2 6.2a3 3 0 0 1 0 5.6M17.6 14.3c2 .7 3.2 2.3 3.5 4.4"/></svg>',
     bjelle:'<svg viewBox="0 0 24 24"><path d="M6.5 16V10a5.5 5.5 0 0 1 11 0v6l1.6 2.4H4.9L6.5 16Z"/><path d="M10 19.5a2 2 0 0 0 4 0"/></svg>',
     blyant:'<svg viewBox="0 0 24 24"><path d="M15.6 4.8l3.6 3.6L8.6 19H5v-3.6L15.6 4.8Z"/></svg>',
+    svar:'<svg viewBox="0 0 24 24"><path d="M9.5 6 4 11.5 9.5 17"/><path d="M4.5 11.5H14a6 6 0 0 1 6 6V19"/></svg>',
+    flagg:'<svg viewBox="0 0 24 24"><path d="M5.5 21V4.5"/><path d="M5.5 4.5h11l-2 4 2 4h-11"/></svg>',
+    stopp:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M6 6l12 12"/></svg>',
+    soppel:'<svg viewBox="0 0 24 24"><path d="M4.5 6.5h15M9.5 6.5V4.5h5v2M6.5 6.5l1 13h9l1-13M10 10.5v6M14 10.5v6"/></svg>',
+    mer:'<svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg>',
+    kopi:'<svg viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2.5"/><path d="M15.5 8.5V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7.5a2 2 0 0 0 2 2h2.5"/></svg>',
     nokkel:'<svg viewBox="0 0 24 24"><circle cx="8" cy="8" r="4"/><path d="M11 11l8 8M16.5 16.5l2-2M14 14l2-2"/></svg>',
     koffert:'<svg viewBox="0 0 24 24"><rect x="3" y="7.5" width="18" height="12.5" rx="2.5"/><path d="M9 7.5V5.2A1.2 1.2 0 0 1 10.2 4h3.6A1.2 1.2 0 0 1 15 5.2V7.5"/></svg>',
     post:'<svg viewBox="0 0 24 24"><rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="M4 7.2l8 5.4 8-5.4"/></svg>',
@@ -221,6 +227,7 @@ const UI = (() => {
   }
 
   async function aapneFraVarsel(maal) {
+    if (maal.deltakere && S.trip) { aapneDeltakere(); return true; }
     if (!maal.tur && !maal.chat) return false;
     try {
       if (maal.tur && (!S.trip || S.trip.id !== maal.tur)) await openTrip(maal.tur);
@@ -403,22 +410,47 @@ const UI = (() => {
       </div>
       <h1>Venter på godkjenning</h1>
       <p class="lede">Du har bedt om å bli med på <b>${esc(trip.name)}</b>.
-        Reiselederen må slippe deg inn før du ser programmet og chatten.</p>
-      <button class="btn primary big" id="sjekkIgjen">Sjekk om jeg er godkjent</button>
+        Reiselederen må slippe deg inn før du ser programmet og chatten.
+        Appen åpner turen av seg selv når du er sluppet inn.</p>
+      <button class="btn primary big" id="sjekkIgjen">Sjekk nå</button>
       <button class="btn" style="width:100%;margin-top:10px" id="venterAnnen">Velg en annen tur</button>`;
+
+    // Spør stille om igjen hvert sjette sekund, og med en gang appen
+    // kommer fram igjen. Da slipper man å trykke for å se om det har skjedd.
+    const sjekk = async stille => {
+      if (sjekker) return;
+      sjekker = true;
+      try {
+        const t = await Api.loadTrip(trip.id);
+        if (t && !t.venter) { stoppVenting(); await openTrip(trip.id, t); return true; }
+      } catch (e) {
+        // Avvist: da finnes ikke medlemsraden lenger.
+        if (e && e.utmeldt) { stoppVenting(); sjekker = false; utmeldt("Du ble ikke sluppet inn på turen."); return true; }
+        /* ellers nettet: prøver igjen om litt */
+      }
+      finally { sjekker = false; }
+      if (!stille) toast("Ikke sluppet inn ennå.");
+      return false;
+    };
+    let sjekker = false;
+    stoppVenting();
+    ventetimer = setInterval(() => { if (!document.hidden) sjekk(true); }, 6000);
+    ventesynlig = () => { if (!document.hidden) sjekk(true); };
+    document.addEventListener("visibilitychange", ventesynlig);
 
     $("sjekkIgjen").addEventListener("click", async e => {
       const b = e.currentTarget;
       b.disabled = true; b.innerHTML = prikker() + " Sjekker";
-      try { await openTrip(trip.id); }
-      catch { b.disabled = false; b.textContent = "Sjekk om jeg er godkjent"; }
-      if (!$("authScreen").hidden) {
-        b.disabled = false; b.textContent = "Sjekk om jeg er godkjent";
-        toast("Ikke godkjent ennå.");
-      }
+      const inne = await sjekk(false);
+      if (!inne) { b.disabled = false; b.textContent = "Sjekk nå"; }
     });
 
-    $("venterAnnen").addEventListener("click", () => { S.trip = null; S.fraStart = true; showJoin(); });
+    $("venterAnnen").addEventListener("click", () => { stoppVenting(); S.trip = null; S.fraStart = true; showJoin(); });
+  }
+  let ventetimer = null, ventesynlig = null;
+  function stoppVenting() {
+    if (ventetimer) { clearInterval(ventetimer); ventetimer = null; }
+    if (ventesynlig) { document.removeEventListener("visibilitychange", ventesynlig); ventesynlig = null; }
   }
   /* Du er ikke med lenger. Si det rett ut, og send folk videre — enten
      til en annen tur de er med på, eller til skjemaet. Alt appen hadde
@@ -479,6 +511,11 @@ const UI = (() => {
 
     $("bootScreen").hidden = true;
     $("joinScreen").hidden = true;
+    // Kommer du fra «Venter på godkjenning», ligger den skjermen over
+    // appen. Uten denne linja ble den liggende, og det så ut som om du
+    // ikke var sluppet inn.
+    $("authScreen").hidden = true;
+    stoppVenting();
     $("appScreen").hidden = false;
 
     const p = Api.getProfile();
@@ -503,7 +540,7 @@ const UI = (() => {
       Api.lastPaameldinger(tripId);
       Api.erHer(tripId, null);
       if (trip.role === "leader") {
-        Api.antallVentende(tripId).then(n => { if (n !== S.ventende) { S.ventende = n; render(); } });
+        sjekkVentende(tripId, false);
         Api.ryddGamleBilder();
       } else {
         S.ventende = 0;
@@ -977,7 +1014,10 @@ const UI = (() => {
     }
     return `<span class="vaer" title="Værmelding fra Yr">${ikon}${grader ? `<b>${grader}</b>` : ""}</span>`;
   }
-  function viewProgram() {
+  // Den som venter på å bli sluppet inn, står øverst også her: Program
+  // er fanen reiselederen åpner appen på.
+  const viewProgram = () => venterkort() + viewProgramInnhold();
+  function viewProgramInnhold() {
     const trip = S.trip;
     const leader = trip.role === "leader";
 
@@ -1468,45 +1508,128 @@ const UI = (() => {
      du på bildet, handler menyen om bildet; holder du på teksten, handler
      den om teksten. «del» sier hvilken av dem du tok tak i — uten den
      vises begge, som når du bruker de tre prikkene. */
+  /* Valgene for en melding, slik Meldinger på iPhone gjør det: hold på
+     meldingen, så løftes den fram, resten av samtalen blurres, emojiene
+     står i en kapsel over meldingen og valgene i en liste under. Før var
+     dette et ark med seks emojier og en stabel knapper.
+
+     «del» sier om du holdt på bildet eller teksten i en melding med begge;
+     da gjelder slettingen den delen. */
   function sheetEmoji(id, del) {
     const m = Api.messages(S.openChat).find(x => x.id === id);
+    if (!m) return;
     const rea = Api.reactions(S.openChat, id);
-    const bilde = m && m.bilde;
-    const txt = (m && m.txt) || "";
+    const bilde = m.bilde;
+    const txt = m.txt || "";
     const viserBilde = bilde && del !== "tekst";
     const viserTekst = txt && del !== "bilde";
-    const kanSlette = m && (m.mine || S.trip.role === "leader");
+    const kanSlette = m.mine || S.trip.role === "leader";
     if (viserBilde) forberedBlob(bilde);
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
 
-    // Er det bare den ene delen igjen etterpå, er det ikke noe igjen av
-    // meldingen heller — da slettes hele.
-    const slettBildet = `<button class="btn danger" ${txt
-      ? `data-slettbilde="${esc(bilde)}"` : `data-delmsg="${esc(id)}"`}>Slett bildet</button>`;
-    const slettTeksten = `<button class="btn danger" ${bilde
-      ? `data-deltekst="${esc(id)}"` : `data-delmsg="${esc(id)}"`}>Slett ${bilde ? "teksten" : "meldingen"}</button>`;
-    const slettvalg = !kanSlette ? ""
-      : del === "bilde" ? (bilde ? slettBildet : slettTeksten)
-      : del === "tekst" ? (txt ? slettTeksten : slettBildet)
-      : (bilde ? slettBildet : "") + (txt ? slettTeksten : "");
+    // Er det bare den ene delen igjen etterpå, slettes hele meldingen.
+    const valg = [];
+    const rad = (tekst, ikon, attr, fare) => valg.push(
+      `<button class="kmvalg${fare ? " fare" : ""}" ${attr}><span>${esc(tekst)}</span>${ikon}</button>`);
+    rad("Svar", ICON.svar, `data-svar="${esc(id)}"`);
+    if (viserTekst) rad("Kopier", ICON.kopi, `data-kopimeld="${esc(txt)}"`);
+    if (viserBilde) rad("Lagre bildet", ICON.last, `data-lagrebilde="${esc(bilde)}"`);
+    if (rea.length) rad("Se hvem som reagerte", ICON.folk, `data-reaksjoner="${esc(id)}"`);
+    if (!m.mine && m.authorId) {
+      rad("Rapporter", ICON.flagg, `data-rapporter="${esc(id)}"`);
+      rad(`Blokker ${fornavn(m.who)}`, ICON.stopp, `data-blokker="${esc(m.authorId)}" data-navn="${esc(m.who)}"`, true);
+    }
+    if (kanSlette) {
+      const slettBilde = () => rad("Slett bildet", ICON.soppel, txt ? `data-slettbilde="${esc(bilde)}"` : `data-delmsg="${esc(id)}"`, true);
+      const slettTekst = () => rad(bilde ? "Slett teksten" : "Slett", ICON.soppel, bilde ? `data-deltekst="${esc(id)}"` : `data-delmsg="${esc(id)}"`, true);
+      if (del === "bilde") (bilde ? slettBilde : slettTekst)();
+      else if (del === "tekst") (txt ? slettTekst : slettBilde)();
+      else { if (bilde) slettBilde(); if (txt) slettTekst(); }
+    }
 
-    openSheet(`<h3>${viserBilde && !viserTekst ? "Bilde" : "Melding"}</h3>
-      ${viserBilde ? `<div class="sheetbilde"><img src="${esc(Api.bildeAdresse(bilde) || "")}" alt=""></div>` : ""}
-      ${viserTekst ? `<p class="muted" style="margin:6px 0 14px">${esc(txt.slice(0, 90))}${txt.length > 90 ? "…" : ""}</p>` : ""}
-      <div class="emojirad">
-        ${EMOJIER.map(e => `<button class="emojiknapp" data-emoji="${e}" data-pa="${esc(id)}">${e}</button>`).join("")}
-      </div>
-      ${rea.length ? `<div class="eyebrow" style="margin:18px 0 8px">Hvem har reagert</div>
-        <div class="memberlist">${rea.map(r => `<div class="person">
-          <span>${esc(r.emoji)} ${esc(r.navn.join(", "))}</span></div>`).join("")}</div>` : ""}
-      <div class="stack" style="margin-top:14px">
-        <button class="btn" data-svar="${esc(id)}">Svar på ${viserBilde && !viserTekst ? "bildet" : "meldingen"}</button>
-        ${viserBilde ? `<button class="btn" data-lagrebilde="${esc(bilde)}">${ICON.last} Lagre bildet</button>` : ""}
-        ${viserTekst ? `<button class="btn" data-kopimeld="${esc(txt)}">Kopier teksten</button>` : ""}
-        ${slettvalg}
-        ${m && !m.mine && m.authorId ? `
-        <button class="btn" data-rapporter="${esc(id)}">Rapporter ${viserBilde && !viserTekst ? "bildet" : "meldingen"}</button>
-        <button class="btn danger-tekst" data-blokker="${esc(m.authorId)}" data-navn="${esc(m.who)}">Blokker ${esc(fornavn(m.who))}</button>` : ""}
-      </div>
+    const mine = new Set(rea.filter(r => r.min).map(r => r.emoji));
+    const bg = document.createElement("div");
+    bg.className = "kontekst-bg";
+    bg.innerHTML = `
+      <div class="kontekst${m.mine ? " meg" : ""}">
+        <div class="kmemoji" role="group" aria-label="Reager">
+          ${EMOJIER.map(e => `<button class="${mine.has(e) ? "valgt" : ""}" data-emoji="${e}" data-pa="${esc(id)}" aria-label="Reager med ${e}">${e}</button>`).join("")}
+        </div>
+        <div class="kmmelding"></div>
+        <div class="kmliste" role="menu">${valg.join("")}</div>
+      </div>`;
+    document.body.appendChild(bg);
+
+    // Meldingen selv, løftet fram der den sto. Står den ikke på skjermen
+    // (valgene ble åpnet fra bildet i full skjerm), vises bare utdraget.
+    const kilde = document.getElementById("msg-" + id);
+    const holder = bg.querySelector(".kmmelding");
+    const del2 = kilde && (viserBilde && !viserTekst ? kilde.querySelector(".bildeboks")
+                        : viserTekst && !viserBilde ? kilde.querySelector(".bubble")
+                        : kilde.querySelector(".bildeboks") || kilde.querySelector(".bubble"));
+    const r0 = del2 ? del2.getBoundingClientRect() : null;
+    if (del2 && r0.bottom > 0 && r0.top < innerHeight) {
+      const kopi = del2.cloneNode(true);
+      kopi.removeAttribute("data-bilde");
+      kopi.style.width = r0.width + "px";
+      holder.appendChild(kopi);
+    } else {
+      holder.innerHTML = `<div class="bubble">${esc(txt.slice(0, 160) || "Bilde")}${txt.length > 160 ? "…" : ""}</div>`;
+    }
+
+    /* Plassering: meldingen blir der den var, emojiene over og valgene
+       under. Får ikke alt plass, skyves hele gruppa opp eller ned så den
+       holder seg på skjermen — slik Meldinger gjør. */
+    const gruppe = bg.querySelector(".kontekst");
+    const plasser = () => {
+      const h = gruppe.getBoundingClientRect().height;
+      const emojiH = bg.querySelector(".kmemoji").getBoundingClientRect().height + 10;
+      const topp = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--safe-t")) || 0;
+      const marg = 12;
+      let y = r0 && del2 && holder.querySelector(".bildeboks, .bubble") === holder.firstElementChild && r0.top > 0
+        ? r0.top - emojiH : (innerHeight - h) / 2;
+      y = Math.max(topp + marg + 40, Math.min(y, innerHeight - h - marg - (parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--safe-b")) || 0)));
+      gruppe.style.top = y + "px";
+      if (r0 && del2) {
+        if (m.mine) gruppe.style.right = Math.max(10, innerWidth - r0.right) + "px";
+        else gruppe.style.left = Math.max(10, r0.left) + "px";
+      }
+    };
+    plasser();
+    haptikk("tung");
+    requestAnimationFrame(() => bg.classList.add("inne"));
+
+    const lukk = () => {
+      bg.classList.remove("inne");
+      bg.classList.add("ut");
+      setTimeout(() => bg.remove(), 220);
+    };
+    // Et valg gjør jobben sin i den vanlige klikkbehandleren (den ligger på
+    // dokumentet og får klikket etterpå). Her lukkes bare menyen.
+    // Slipper du fingeren etter holdet, lager telefonen et klikk der
+    // fingeren var — og der ligger nå menyen. Det klikket skal ikke telle:
+    // bare trykk som begynner etter at menyen kom fram.
+    let klar = false;
+    bg.addEventListener("pointerdown", () => { klar = true; });
+    bg.addEventListener("click", e => {
+      if (!klar) { e.stopPropagation(); e.preventDefault(); return; }
+      if (e.target.closest("[data-emoji],[data-svar],[data-kopimeld],[data-lagrebilde],[data-reaksjoner],[data-rapporter],[data-reaksjoner],[data-blokker],[data-slettbilde],[data-deltekst],[data-delmsg]")) {
+        lukk();
+        return;
+      }
+      if (!e.target.closest(".kmliste, .kmemoji")) { e.stopPropagation(); lukk(); }
+    });
+    kontekstLukk = lukk;
+  }
+  let kontekstLukk = null;
+
+  function sheetReaksjoner(id) {
+    const rea = Api.reactions(S.openChat, id);
+    openSheet(`<h3>Reaksjoner</h3>
+      <div class="gruppe"><div class="list">${rea.map(r => `<div class="listrow bar">
+        <span style="font-size:22px;line-height:1">${esc(r.emoji)}</span>
+        <div class="grow"><div class="nm" style="white-space:normal">${esc(r.navn.join(", "))}</div></div>
+      </div>`).join("")}</div></div>
       <button class="btn close" data-close>Lukk</button>`);
   }
 
@@ -1776,7 +1899,7 @@ const UI = (() => {
             <span class="chev">${ICON.chev}</span>
           </button>
           ${x.slag === "day" || x.slag === "place"
-            ? `<button class="linkbtn skjulknapp" data-skjul="${esc(x.slag)}" data-skjulid="${esc(x.id)}">ikke nødvendig</button>`
+            ? `<button class="linkbtn skjulknapp" data-skjul="${esc(x.slag)}" data-skjulid="${esc(x.id)}">Ikke nødvendig</button>`
             : ""}
         </div>`).join("")}</div>
       </div>
@@ -1828,6 +1951,47 @@ const UI = (() => {
       <button class="btn close" data-close>Lukk</button>`);
   }
 
+  /* Noen venter på å bli sluppet inn. Før måtte reiselederen gå inn i
+     Deltakere for å se det. Nå står det øverst i Program og Turen, og
+     kommer det en ny mens appen er framme, sier appen fra. Lista sjekkes
+     hvert tjuende sekund mens appen vises (varsler på telefonen kommer
+     når push er på plass). */
+  let ventetimerLeder = null;
+  async function sjekkVentende(tripId, varsle) {
+    if (!S.trip || S.trip.id !== tripId || S.trip.role !== "leader") return;
+    const liste = await Api.ventendeListe(tripId).catch(() => null);
+    if (!liste || !S.trip || S.trip.id !== tripId) return;
+    const kjente = new Set((S.ventendeListe || []).map(x => x.id));
+    const nye = liste.filter(x => !kjente.has(x.id));
+    const endret = liste.length !== (S.ventendeListe || []).length || nye.length;
+    S.ventendeListe = liste;
+    S.ventende = liste.length;
+    if (varsle && nye.length && S.side !== "deltakere") {
+      toast(nye.length === 1 ? `${nye[0].navn} vil bli med på turen` : `${nye.length} vil bli med på turen`, { deltakere: true });
+    }
+    if (endret) {
+      if (S.side === "deltakere") aapneDeltakere(true); else render();
+    }
+    clearTimeout(ventetimerLeder);
+    ventetimerLeder = setTimeout(function igjen() {
+      if (document.hidden) { ventetimerLeder = setTimeout(igjen, 20000); return; }
+      sjekkVentende(tripId, true);
+    }, 20000);
+  }
+  function venterkort() {
+    const liste = S.ventendeListe || [];
+    if (S.trip.role !== "leader" || !liste.length) return "";
+    const tittel = liste.length === 1 ? `${liste[0].navn} venter på å bli med`
+      : `${liste.length} venter på å bli med`;
+    return `<div class="card venterkort">
+        <button class="listrow" data-sheet="deltakere">
+          <span class="rikon gul">${ICON.folk}</span>
+          <div class="grow"><div class="nm">${esc(tittel)}</div>
+            <div class="sub">Slipp inn eller avvis</div></div>
+          <span class="chev">${ICON.chev}</span></button>
+      </div>`;
+  }
+
   function rapportkort() {
     const n = (S.rapporter || []).length;
     if (S.trip.role !== "leader" || !n) return "";
@@ -1845,6 +2009,7 @@ const UI = (() => {
     const trip = S.trip;
     const leder = trip.role === "leader";
     return `
+      ${venterkort()}
       ${rapportkort()}
       ${slettekort()}
       ${maaOrdnes()}
@@ -1877,10 +2042,11 @@ const UI = (() => {
             <span class="verdi">${esc(trip.dates || trip.name)}</span>
             <span class="chev">${ICON.chev}</span></button>` : ""}
 
-          <button class="listrow" data-copy="${esc(trip.code)}">
+          <button class="listrow" data-side="turkode">
             <span class="rikon grunn">${ICON.nokkel}</span>
             <div class="grow"><div class="nm">Turkode</div></div>
-            <b class="mono" style="font-size:17px;letter-spacing:.09em">${esc(trip.code)}</b></button>
+            <span class="verdi mono" style="letter-spacing:.08em">${esc(trip.code)}</span>
+            <span class="chev">${ICON.chev}</span></button>
 
           ${leder && trip.slettes ? `<button class="listrow" data-sheet="sletting">
             <span class="rikon grunn">${ICON.cal}</span>
@@ -1888,15 +2054,6 @@ const UI = (() => {
             <span class="verdi">${esc(sletteTekst(trip.slettes))}</span>
             <span class="chev">${ICON.chev}</span></button>` : ""}
 
-          ${leder ? `<button class="listrow" data-sheet="delkode">
-            <span class="rikon grunn">${ICON.nav}</span>
-            <div class="grow"><div class="nm">Del turkoden</div></div>
-            <span class="chev">${ICON.chev}</span></button>` : ""}
-
-          ${leder ? `<button class="listrow" data-sheet="byttkode">
-            <span class="rikon gul">${ICON.spark}</span>
-            <div class="grow"><div class="nm">Lag ny turkode</div></div>
-            <span class="chev">${ICON.chev}</span></button>` : ""}
         </div></div>
       </div>`;
   }
@@ -2037,9 +2194,10 @@ const UI = (() => {
       const sidenavn = { deltakere: "Deltakere og roller", varsler: "Varsler", chat: "Om chatten", rom: "Rom",
                          pakk: "Pakkeliste", seter: "Sitteplasser",
                          kontakt: "Telefonnumre", opprop: "Opprop", dokumenter: "Dokumenter",
-                         tilgang: "Tilgangskoder" };
-      $("convName").textContent = sidenavn[side] || "";
-      $("convSub").textContent = S.trip.name;
+                         tilgang: "Tilgangskoder", turkode: "Turkode" };
+      const kj = side === "seter" && S.seteKj && S.setekart && S.setekart.kjoretoy.find(k => k.id === S.seteKj);
+      $("convName").textContent = kj ? kj.navn : (sidenavn[side] || "");
+      $("convSub").textContent = kj ? "Sitteplasser" : side === "tilgang" ? "For TripMate" : S.trip.name;
     } else if (conv) {
       $("convName").textContent = conv.name;
       $("convSub").textContent = conv.ledere ? "Bare reiseledere · følger lederrollen"
@@ -2049,7 +2207,8 @@ const UI = (() => {
       $("convWho").dataset.members = conv.id;
     } else {
       $("tripName").textContent = S.trip.name;
-      $("tripSub").textContent = [S.trip.org, S.trip.dates].filter(Boolean).join(" · ") || ("Kode " + S.trip.code);
+      // Turkoden hører hjemme på sin egen side, ikke øverst på skjermen.
+      $("tripSub").textContent = [S.trip.org, S.trip.dates].filter(Boolean).join(" · ");
     }
 
     $("banner").innerHTML = S.offline
@@ -2082,7 +2241,7 @@ const UI = (() => {
 
     // Bytter du skjermbilde, skal du begynne på toppen av det nye — ikke
     // stå midt nede fordi du var langt nede i det forrige.
-    const visning = side || S.tab + (S.openChat || "");
+    const visning = side ? side + (side === "seter" ? S.seteKj || "" : "") : S.tab + (S.openChat || "");
     const byttetVisning = visning !== S.sisteVisning;
     S.sisteVisning = visning;
 
@@ -2096,6 +2255,7 @@ const UI = (() => {
                           : side === "deltakere" ? viewDeltakere()
                           : side === "dokumenter" ? viewDokumenter()
                           : side === "tilgang" ? viewTilgang()
+                          : side === "turkode" ? viewTurkode()
                           : visningFor(S.tab);
     if (side === "varsler") settOppVarsler();
     if (byttetVisning && !conv) $("screen").scrollTop = 0;
@@ -2301,7 +2461,7 @@ const UI = (() => {
       if (!nede) return;
       nede = false;
       if (pekt && pekt !== S.tab) byttFane(pekt);
-      else visFane(S.tab);
+      else { visFane(S.tab); if (pekt === S.tab) tilStartenAvFanen(); }
       pekt = null;
     };
     bar.addEventListener("pointerup", slipp);
@@ -2319,6 +2479,25 @@ const UI = (() => {
       S.megTall = t;
       if (S.trip && (S.tab === "meg" || S.tab === "turen" || S.tab === "program") && !S.side && !S.openChat) render();
     }).catch(() => {});
+  }
+
+  /* Trykk på fanen du alt står i, slik iOS gjør: står du inne på en
+     side eller i en samtale, kommer du tilbake til starten av fanen. Står
+     du alt der, ruller den til toppen. */
+  function tilStartenAvFanen() {
+    // To nivåer inne (ett kjøretøy under Sitteplasser): rett ut, i ett hopp.
+    if (S.side === "seter" && S.seteKj && history.state && history.state.kj) {
+      S.seteKj = null; S.side = null;
+      hentMegTall(true);
+      render();
+      egenTilbake = true;
+      setTimeout(() => { egenTilbake = false; }, 400);
+      return history.go(-2);
+    }
+    if (S.side) { S.seteKj = null; return lukkSide(); }
+    if (S.openChat) return closeChat();
+    const sk = $("screen");
+    if (sk.scrollTop > 0) sk.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function byttFane(id) {
@@ -2419,6 +2598,27 @@ const UI = (() => {
             window.Capacitor.isNativePlatform());
   const nativPlugin = navn =>
     (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins[navn]) || null;
+
+  /* Kopier til utklippstavla. Nettleserens måte først; virker den ikke
+     (eldre Safari, eller trykket regnes ikke som ditt fordi appen ventet
+     på noe først), merker vi teksten i et skjult felt og kopierer den. */
+  async function kopier(tekst) {
+    try { await navigator.clipboard.writeText(tekst); return; } catch { /* prøv neste */ }
+    const f = document.createElement("textarea");
+    f.value = tekst; f.setAttribute("readonly", "");
+    f.style.cssText = "position:fixed;top:0;left:0;opacity:0;pointer-events:none";
+    document.body.appendChild(f);
+    f.select(); f.setSelectionRange(0, tekst.length);
+    const ok = document.execCommand && document.execCommand("copy");
+    f.remove();
+    if (!ok) throw new Error("kopiering");
+  }
+  // Et lett dunk i telefonen når noe er gjort, som i iOS. Bare i appen.
+  function haptikk(type) {
+    const H = nativPlugin("Haptics");
+    if (!H) return;
+    (type === "valg" ? H.selectionChanged() : H.impact({ style: type === "tung" ? "MEDIUM" : "LIGHT" })).catch(() => {});
+  }
 
   /* Tekststørrelsen fra iPhone-innstillingene (E17). Appen er skrevet i
      piksler, så den fulgte ikke «Større tekst». I app-versjonen måler vi
@@ -2655,9 +2855,9 @@ const UI = (() => {
   const FORBUDT = [
     // Disse stoppes også inne i et lengre ord («horeHei»), siden ingen
     // vanlige norske ord begynner slik.
-    /\bhore/i, /\bfitte/i, /\bneger/i, /\bnegre/i, /\bn[i1!]gg/i, /\bfaggot/i, /\bretard/i,
+    /\bhore/i, /\bfitt[ae]/i, /\bneger/i, /\bcunt/i, /\bwhore/i, /\bnegre/i, /\bn[i1!]gg/i, /\bfaggot/i, /\bretard/i,
     // Disse kan være begynnelsen på helt vanlige ord, så de må stå alene.
-    /\bhor(?:a|en|er|ene)\b/i, /\bpikk(?:en|er)?\b/i, /\bsoperi?\b/i, /\bmongo(?:er|en)?\b/i,
+    /\bhor(?:a|en|er|ene)\b/i, /\bpikk(?:en|er)?\b/i, /\bkuk(?:en|er|ene)?\b/i, /\bslut\b/i, /\bsoperi?\b/i, /\bmongo(?:er|en)?\b/i,
     /\b(?:kys|drep) deg selv\b/i, /\bkill yourself\b/i, /\bkys\b(?=\W*$)/i
   ];
   const harForbudtOrd = t => FORBUDT.some(r => r.test(t));
@@ -2668,25 +2868,58 @@ const UI = (() => {
   const REGLER_NOKKEL = "tm.chatregler.v1";
   async function godtattChatregler() {
     try { if (localStorage.getItem(REGLER_NOKKEL)) return true; } catch {}
-    const ok = await new Promise(svar => {
-      if (ventendeSvar) { const r = ventendeSvar; ventendeSvar = null; r(false); }
-      openSheet(`<h3>Regler for chatten</h3>
-        <p class="lede">Godta reglene før du skriver første gang.</p>
-        <ul class="regler">
-          <li>Ingen trakassering, mobbing, trusler eller hets.</li>
-          <li>Ikke seksuelt innhold, og ikke bilder av andre uten at de har sagt ja.</li>
-          <li>Du kan rapportere meldinger og blokkere personer. Rapporter blir sett på innen 24 timer.</li>
-          <li>Den som bryter reglene, kan bli tatt ut av turen og utestengt.</li>
+    // Tastaturet ned først: reglene skal leses, ikke skrives i.
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    const regel = (ikon, tekst) => `<li><span class="rikon">${ikon}</span><span>${tekst}</span></li>`;
+    const ok = await helside({
+      tittel: "Regler for chatten",
+      innhold: `
+        <h2 class="helside-h">Før du skriver første gang</h2>
+        <p class="lede">TripMate er for hele gruppa. Reglene gjelder i alle chatter og for alle bilder.</p>
+        <ul class="regelliste">
+          ${regel(ICON.folk, "Ingen trakassering, mobbing, trusler eller hets.")}
+          ${regel(ICON.bilde, "Ikke seksuelt innhold, og ikke bilder av andre uten at de har sagt ja.")}
+          ${regel(ICON.info, "Du kan rapportere meldinger og blokkere personer. Rapporter blir sett på innen 24 timer.")}
+          ${regel(ICON.nokkel, "Den som bryter reglene, kan bli tatt ut av turen og utestengt.")}
         </ul>
-        <p class="muted" style="font-size:14px;margin:0 0 16px">Hele vilkårene står under Meg → Om appen.</p>
-        <button class="btn primary big" id="rgJa">Jeg godtar</button>
-        <button class="btn close" id="rgNei">Avbryt</button>`);
-      ventendeSvar = svar;          // lukkes arket uten svar, er svaret nei
-      $("rgJa").addEventListener("click", () => { ventendeSvar = null; closeSheet(); svar(true); });
-      $("rgNei").addEventListener("click", () => closeSheet());
+        <a class="linkbtn" style="display:inline-block;margin-top:10px;font-size:15px" href="${VILKAAR_URL}" target="_blank" rel="noopener">Les hele vilkårene</a>`,
+      ja: "Jeg godtar"
     });
     if (ok) { try { localStorage.setItem(REGLER_NOKKEL, new Date().toISOString()); } catch {} }
     return ok;
+  }
+
+  /* En helside som glir opp over appen, som et skjermbilde i iOS som
+     åpnes «over» det du holdt på med. Brukes når noe skal leses og
+     svares på, ikke bare bekreftes: Avbryt øverst til venstre, svaret
+     nederst. Svarer med true eller false. */
+  function helside({ tittel, innhold, ja }) {
+    return new Promise(svar => {
+      const gammel = document.querySelector(".helside");
+      if (gammel) gammel.remove();
+      const el = document.createElement("div");
+      el.className = "helside";
+      el.setAttribute("role", "dialog");
+      el.setAttribute("aria-modal", "true");
+      el.setAttribute("aria-label", tittel);
+      el.innerHTML = `
+        <header class="helside-topp">
+          <button class="helside-avbryt" type="button">Avbryt</button>
+          <b>${esc(tittel)}</b><span aria-hidden="true"></span>
+        </header>
+        <div class="helside-innhold">${innhold}</div>
+        <div class="helside-bunn"><button class="btn primary big" type="button">${esc(ja)}</button></div>`;
+      $("appScreen").appendChild(el);
+      requestAnimationFrame(() => el.classList.add("inne"));
+      const lukk = v => {
+        el.classList.remove("inne");
+        el.classList.add("ut");
+        setTimeout(() => el.remove(), 320);
+        svar(v);
+      };
+      el.querySelector(".helside-avbryt").addEventListener("click", () => lukk(false));
+      el.querySelector(".helside-bunn .btn").addEventListener("click", () => lukk(true));
+    });
   }
 
   async function onSend(e) {
@@ -2731,7 +2964,44 @@ const UI = (() => {
   }
 
   /* ───────────────── ark ───────────────── */
+  /* Har du skrevet eller valgt noe i et skjema i arket, skal det ikke
+     forsvinne fordi du dro arket ned eller trykket ved siden av. Da
+     spør appen først, som iOS gjør: «Forkast endringene» eller «Fortsett».
+     Lagre og Avbryt lukker som før; det er bare de utilsiktede veiene ut
+     som stoppes. */
+  let arkEndret = false;
+  $("sheet").addEventListener("input", e => { if (e.target.closest("form")) arkEndret = true; });
+  $("sheet").addEventListener("change", e => { if (e.target.closest("form")) arkEndret = true; });
+  function forsokLukkArk() {
+    if (!arkEndret) return closeSheet();
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    visForkastValg().then(forkast => { if (forkast) closeSheet(); });
+  }
+  // Handlingsarket ligger over arket, så det du har skrevet, blir stående.
+  function visForkastValg() {
+    return new Promise(svar => {
+      const el = document.createElement("div");
+      el.className = "handlingsark-bg";
+      el.innerHTML = `<div class="handlingsark" role="alertdialog" aria-label="Forkaste endringene?">
+          <div class="handlingsgruppe">
+            <p class="handlingstekst">Du har endringer som ikke er lagret.</p>
+            <button class="handling fare" data-v="1">Forkast endringene</button>
+          </div>
+          <div class="handlingsgruppe"><button class="handling fet" data-v="0">Fortsett å redigere</button></div>
+        </div>`;
+      document.body.appendChild(el);
+      requestAnimationFrame(() => el.classList.add("inne"));
+      const ferdig = v => { el.classList.remove("inne"); setTimeout(() => el.remove(), 260); svar(v); };
+      el.addEventListener("click", e => {
+        const b = e.target.closest("[data-v]");
+        if (b) return ferdig(b.dataset.v === "1");
+        if (e.target === el) ferdig(false);
+      });
+    });
+  }
+
   function openSheet(html) {
+    arkEndret = false;
     const s = $("sheet");
     s.innerHTML = `<div class="grabsone"><div class="grab"></div></div><div class="sheetbody">${html}</div>`;
     s.style.transform = "";
@@ -2740,6 +3010,7 @@ const UI = (() => {
     $("sheetBg").hidden = false;
   }
   function closeSheet() {
+    arkEndret = false;
     $("sheetBg").hidden = true;
     $("sheet").style.transform = "";
     // Lukkes et bekreftelsesark uten svar (dratt ned, trykket utenfor),
@@ -2835,7 +3106,10 @@ const UI = (() => {
         s.classList.add("dragging");
       }
       dy = Math.max(0, d);
-      s.style.transform = `translateY(${dy}px)`;
+      // Med ulagrede endringer gir arket etter, men bare litt: det viser
+      // at det kan lukkes, uten å lukke seg.
+      const vis = arkEndret ? Math.min(90, dy * 0.35) : dy;
+      s.style.transform = `translateY(${vis}px)`;
       return kanStoppe;
     }
 
@@ -2859,7 +3133,8 @@ const UI = (() => {
       if (!drar) return;
       drar = false;
       s.classList.remove("dragging");
-      if (dy > 100) lukkArkAnimert();
+      if (dy > 100 && arkEndret) { s.style.transform = ""; forsokLukkArk(); }
+      else if (dy > 100) lukkArkAnimert();
       else s.style.transform = "";
     }
 
@@ -3189,7 +3464,7 @@ const UI = (() => {
     // Har kontoen en grense, står den øverst, så ingen blir overrasket
     // når nummer 51 ikke kommer inn.
     const k = (tilgang.koder || []).find(x => x.turerIgjen === null || x.turerIgjen > 0);
-    const grense = !tilgang.superadmin && k ? `<p class="muted" style="margin:0 0 14px">Opptil ${k.maksDeltakere} personer per tur${
+    const grense = !tilgang.superadmin && k ? `<p class="muted" style="margin:0 0 14px">${k.maksDeltakere === null ? "Ingen grense på antall personer" : `Opptil ${k.maksDeltakere} personer per tur`}${
       k.turerIgjen === null ? "" : ` · ${k.turerIgjen === 1 ? "1 tur" : k.turerIgjen + " turer"} igjen`}.</p>` : "";
 
     openSheet(`<h3 style="margin-bottom:14px">Lag en ny tur</h3>
@@ -4084,6 +4359,7 @@ const UI = (() => {
   }
 
   async function aapneSeter(fraHistorikk) {
+    if (!fraHistorikk) S.seteKj = null;
     S.side = "seter"; S.setekart = null; S.seteFeil = false;
     if (!fraHistorikk) history.pushState({ side: "seter" }, "");
     render();
@@ -4165,12 +4441,45 @@ const UI = (() => {
         : "Ikke satt opp ennå."}</p>
       ${nyknapp}`;
 
+    // Ett kjøretøy åpnet: kartet for det alene, med byttene som gjelder det.
+    const valgt = S.seteKj && kart.find(k => k.id === S.seteKj);
+    if (valgt) return `
+      ${utenNett(S.setekart)}
+      ${bytteliste([valgt], leder)}
+      ${kjoretoykort(valgt, leder)}`;
+
     return `
       ${utenNett(S.setekart)}
       ${bytteliste(kart, leder)}
       ${toppTekst(kart, leder)}
       ${kjoretoygrupper(kart, leder)}
       ${nyknapp}`;
+  }
+
+  /* Setekartet for ett kjøretøy er en egen side under Sitteplasser. Før
+     sto alle kartene etter hverandre, og med en buss på 57 plasser måtte
+     man bla tre skjermer for å finne bilen. Nå er lista en rad per
+     kjøretøy, og kartet kommer når du trykker. */
+  function aapneKjoretoy(id) {
+    S.seteKj = id;
+    history.pushState({ side: "seter", kj: id }, "");
+    render();
+  }
+  // Rad i lista: navn, hvor fullt, og din plass eller hva du kan gjøre.
+  function kjoretoyrad(k, leder) {
+    const o = oppsett(k.typ);
+    const mitt = k.seter.find(s2 => s2.meg);
+    const ledige = k.plasser - k.seter.length;
+    const verdi = leder ? `${ledige} ledige`
+      : mitt ? plassnavn(k, mitt.nr)
+      : k.fritt && ledige ? "Velg plass" : "";
+    const venter = k.bytter.some(x => (x.tilMeg && x.status === "venter_andre") || (leder && x.status === "venter_leder"));
+    return `<button class="listrow" data-kjside="${esc(k.id)}">
+        <span class="rikon${mitt ? " mose" : ""}">${ICON.sete}</span>
+        <div class="grow"><div class="nm">${esc(k.navn)}${venter ? '<span class="prikkmerke"></span>' : ""}</div>
+          <div class="sub">${esc(o.navn)} · ${k.seter.length} av ${k.plasser} tatt</div></div>
+        ${verdi ? `<span class="verdi"${!leder && !mitt ? ' style="color:var(--blue-ink)"' : ""}>${esc(verdi)}</span>` : ""}
+        <span class="chev">${ICON.chev}</span></button>`;
   }
 
   /* Kjøretøyene står under dagen de går. «Buss ned» og «Buss hjem» var
@@ -4181,7 +4490,7 @@ const UI = (() => {
   function kjoretoygrupper(kart, leder) {
     // Én overskrift per dag, i dagens rekkefølge, og «Hele turen» sist.
     // Står bare ett kjøretøy uten dato, trengs ingen overskrift.
-    if (kart.length === 1 && !kart[0].dato) return kjoretoykort(kart[0], leder);
+    if (kart.length === 1 && !kart[0].dato) return `<div class="gruppe"><div class="list">${kjoretoyrad(kart[0], leder)}</div></div>`;
 
     const datoer = Array.from(new Set(kart.map(k => k.dato || ""))).sort((a, b) =>
       a === "" ? 1 : b === "" ? -1 : a.localeCompare(b));
@@ -4201,7 +4510,7 @@ const UI = (() => {
         const hint = !valg ? "" : leder
           ? `<p class="muted kjhint">${g.kart.length} kjøretøy samtidig. Hver deltaker får plass i ett av dem.</p>`
           : `<p class="muted kjhint">${minI ? `Du sitter i ${esc(minI.navn)}.` : "Velg plass i ett av dem."}</p>`;
-        return hint + g.kart.map(k => kjoretoykort(k, leder)).join("");
+        return hint + `<div class="gruppe"><div class="list">${g.kart.map(k => kjoretoyrad(k, leder)).join("")}</div></div>`;
       }).join("");
       return `<div>
         <div class="eyebrow" style="margin-bottom:8px${d === today() ? ";color:var(--blue-ink)" : ""}">${esc(tittel)}</div>
@@ -4322,15 +4631,19 @@ const UI = (() => {
       <div class="kjtopp">
         <div class="grow"><b>${esc(k.navn)}</b>
           <small>${esc(o.navn)} · ${esc(status)}</small></div>
-        ${leder ? `<button class="minibtn" data-endrekj="${esc(k.id)}"
-          aria-label="Endre ${esc(k.navn)}">${ICON.blyant}</button>` : ""}
+        ${leder ? `<button class="pilleknapp" data-endrekj="${esc(k.id)}">Rediger</button>` : ""}
       </div>
       <div class="setekart">${seteRader(k).map(rad).join("")}</div>
-      ${leder ? `<div class="kjknapper">
-        <button class="btn" data-fyllseter="${esc(k.id)}">Fyll ledige plasser</button>
-        <button class="btn" data-seteliste="${esc(k.id)}">Hvem sitter hvor</button>
-      </div>` : ""}
-    </div>`;
+    </div>
+    ${leder ? `<div class="gruppe"><div class="list">
+        <button class="listrow" data-seteliste="${esc(k.id)}">
+          <span class="rikon grunn">${ICON.folk}</span>
+          <div class="grow"><div class="nm">Hvem sitter hvor</div></div>
+          <span class="chev">${ICON.chev}</span></button>
+        <button class="listrow" data-fyllseter="${esc(k.id)}">
+          <span class="rikon gul">${ICON.spark}</span>
+          <div class="grow"><div class="nm">Fyll ledige plasser</div></div></button>
+      </div></div>` : ""}`;
   }
 
   /* Rom er ikke et setekart. Ingen midtgang, ingen nummerering man
@@ -5003,9 +5316,10 @@ const UI = (() => {
       btn.disabled = true; btn.textContent = "Lager…";
       try {
         const ny = await Api.byttTurkode(S.trip.id);
-        await openTrip(S.trip.id);
+        S.trip.code = ny;
+        S.trips = (S.trips || []).map(x => x.id === S.trip.id ? Object.assign({}, x, { code: ny }) : x);
         closeSheet();
-        S.tab = "turen"; render();
+        render();
         toast("Ny turkode: " + ny);
       } catch (e) {
         btn.disabled = false; btn.textContent = "Lag en ny kode";
@@ -5191,38 +5505,57 @@ const UI = (() => {
       <button class="btn close" data-close>Lukk</button>`);
   }
 
-  /* L3: turkoden som QR-kode og lenke. Lenken fyller inn koden når den
-     åpnes. QR-koden lages på telefonen (vendor/qrcode.js, MIT). */
+  /* L3: alt om turkoden på én side: koden selv, QR-koden og lenken.
+     Lenken fyller inn koden når den åpnes. QR-koden lages på telefonen
+     (vendor/qrcode.js, MIT). Før lå dette spredt på tre rader i Turen. */
   const DELE_URL = "https://tripmateub.github.io/tripmate/";
-  function sheetDelKode() {
-    const lenke = `${DELE_URL}?kode=${encodeURIComponent(S.trip.code)}`;
+  const turlenke = () => `${DELE_URL}?kode=${encodeURIComponent(S.trip.code)}`;
+  function aapneTurkode(fraHistorikk) {
+    S.side = "turkode";
+    if (!fraHistorikk) history.pushState({ side: "turkode" }, "");
+    render();
+  }
+  function viewTurkode() {
+    const leder = S.trip.role === "leader";
     let svg = "";
     try {
-      const q = qrcode(0, "M"); q.addData(lenke); q.make();
+      const q = qrcode(0, "M"); q.addData(turlenke()); q.make();
       svg = q.createSvgTag({ cellSize: 6, margin: 2, scalable: true });
-    } catch { /* uten QR viser vi bare lenken */ }
-    openSheet(`<h3>Del turkoden</h3>
-      <p class="lede">Vis QR-koden på tavla, eller send lenken. Den fyller inn koden <b class="mono">${esc(S.trip.code)}</b> når den åpnes.</p>
-      ${svg ? `<div class="qrkode" aria-label="QR-kode for å bli med på turen">${svg}</div>` : ""}
-      <div class="field"><label for="dkLenke">Lenke</label><input id="dkLenke" readonly value="${esc(lenke)}"></div>
-      <div class="stack">
-        <button class="btn primary" id="dkKopier">Kopier lenken</button>
-        <button class="btn" id="dkDel">Del</button>
+    } catch { /* uten QR viser vi bare koden og lenken */ }
+    return `
+      <div class="kodeside">
+        <button class="storkode mono" data-copy="${esc(S.trip.code)}" aria-label="Kopier turkoden ${esc(S.trip.code)}">${esc(S.trip.code)}</button>
+        <p class="muted kodehint">Trykk på koden for å kopiere den.</p>
+        ${svg ? `<div class="qrkode" aria-label="QR-kode for å bli med på turen">${svg}</div>
+          <p class="muted kodehint">Skann med kameraet for å bli med.</p>` : ""}
       </div>
-      <button class="btn close" data-close>Lukk</button>`);
-    $("dkKopier").addEventListener("click", async () => {
-      try { await navigator.clipboard.writeText(lenke); toast("Lenken er kopiert."); }
-      catch { $("dkLenke").select(); toast("Merk lenken og kopier den."); }
-    });
-    $("dkDel").addEventListener("click", async () => {
-      const tekst = `Bli med på ${S.trip.name} i TripMate: ${lenke}`;
-      const Share = nativPlugin("Share");
-      try {
-        if (erNativ() && Share) await Share.share({ text: tekst, url: lenke });
-        else if (navigator.share) await navigator.share({ text: tekst, url: lenke });
-        else { await navigator.clipboard.writeText(lenke); toast("Lenken er kopiert."); }
-      } catch { /* avbrutt */ }
-    });
+      <div class="gruppe"><div class="list">
+        <button class="listrow" data-turkode="del">
+          <span class="rikon">${ICON.nav}</span>
+          <div class="grow"><div class="nm">Send lenken</div></div></button>
+        <button class="listrow" data-turkode="lenke">
+          <span class="rikon grunn">${ICON.kopi}</span>
+          <div class="grow"><div class="nm">Kopier lenken</div></div></button>
+      </div></div>
+      ${leder ? `<div>
+        <div class="gruppe"><div class="list">
+          <button class="listrow" data-sheet="byttkode">
+            <span class="rikon gul">${ICON.spark}</span>
+            <div class="grow"><div class="nm">Lag ny turkode</div></div>
+            <span class="chev">${ICON.chev}</span></button>
+        </div></div>
+        <p class="muted" style="font-size:13.5px;margin:8px 4px 0">Kom koden ut til flere enn den skulle? En ny kode stenger den gamle. De som er med, merker ingenting.</p>
+      </div>` : ""}`;
+  }
+  async function delTurlenke() {
+    const lenke = turlenke();
+    const tekst = `Bli med på ${S.trip.name} i TripMate. Turkoden er ${S.trip.code}: ${lenke}`;
+    const Share = nativPlugin("Share");
+    try {
+      if (erNativ() && Share) await Share.share({ text: tekst, url: lenke });
+      else if (navigator.share) await navigator.share({ text: tekst, url: lenke });
+      else { await navigator.clipboard.writeText(lenke); toast("Lenken er kopiert."); }
+    } catch { /* avbrutt */ }
   }
 
   /* L8: dokumenter. Egen side, som pakkelista. */
@@ -5247,67 +5580,74 @@ const UI = (() => {
   function viewTilgang() {
     if (S.tilgangFeil) return '<p class="muted">Klarte ikke hente kodene.</p>';
     if (!S.tilgangListe) return venter("Henter kodene");
-    const dato = d => new Date(d + "T12:00").toLocaleDateString("nb-NO", { day: "numeric", month: "short", year: "numeric" });
-    const rad = x => {
-      const utlopt = x.gyldigTil && x.gyldigTil < today();
-      const status = !x.aktiv ? "Stengt" : utlopt ? "Utløpt" : x.brukt ? (x.bruktNavn || "I bruk") : "Ikke brukt ennå";
-      const turer = x.maksTurer === null ? `${x.turer} turer` : `${x.turer} av ${x.maksTurer} ${x.maksTurer === 1 ? "tur" : "turer"}`;
-      return `<div class="card pad tilgangkort${!x.aktiv || utlopt ? " av" : ""}">
-        <div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline">
-          <b>${esc(x.kunde)}</b><span class="muted" style="font-size:13px">${esc(status)}</span></div>
-        <button class="kodeknapp" data-copy="${esc(x.kode)}">${esc(x.kode)}</button>
-        <div class="muted" style="font-size:13.5px">Opptil ${x.maksDeltakere} personer · ${esc(turer)}${x.gyldigTil ? ` · til ${esc(dato(x.gyldigTil))}` : ""}</div>
-        <button class="linkbtn${x.aktiv ? " fare" : ""}" style="margin-top:8px;font-size:13px" data-tilgangaktiv="${esc(x.id)}" data-paa="${x.aktiv ? "0" : "1"}">${x.aktiv ? "Steng koden" : "Åpne koden igjen"}</button>
-      </div>`;
-    };
+    // Én rad per kode, som i Innstillinger. Trykk på raden for å kopiere
+    // eller stenge; selve koden står under kundens navn.
+    const rad = x => `<button class="listrow bar${!x.aktiv || tilgangUtlopt(x) ? " av" : ""}" data-tilgangvalg="${esc(x.id)}">
+        <div class="grow"><div class="nm">${esc(x.kunde)}</div>
+          <div class="sub"><span class="mono" style="letter-spacing:.04em">${esc(x.kode)}</span> · ${esc(tilgangOmfang(x))}</div></div>
+        <span class="verdi">${esc(tilgangStatus(x))}</span>
+        <span class="chev">${ICON.chev}</span></button>`;
     return `
       <button class="btn primary big" data-sheet="nytilgang">Ny tilgangskode</button>
-      ${S.tilgangListe.length ? `<div style="display:flex;flex-direction:column;gap:10px">${S.tilgangListe.map(rad).join("")}</div>`
+      ${S.tilgangListe.length ? `<div class="gruppe"><div class="list">${S.tilgangListe.map(rad).join("")}</div></div>`
         : '<p class="muted" style="margin:0">Ingen koder ennå.</p>'}`;
   }
+  const tilgangUtlopt = x => Boolean(x.gyldigTil && x.gyldigTil < today());
+  const tilgangStatus = x => !x.aktiv ? "Stengt" : tilgangUtlopt(x) ? "Utløpt" : x.brukt ? (x.bruktNavn || "I bruk") : "Ikke brukt";
+  function tilgangOmfang(x) {
+    const turer = x.maksTurer === null ? `${x.turer} ${x.turer === 1 ? "tur" : "turer"}, ubegrenset`
+      : `${x.turer} av ${x.maksTurer} ${x.maksTurer === 1 ? "tur" : "turer"}`;
+    const folk = x.maksDeltakere === null ? "alle størrelser" : `opptil ${x.maksDeltakere} personer`;
+    const dato = x.gyldigTil ? ` · til ${new Date(x.gyldigTil + "T12:00").toLocaleDateString("nb-NO", { day: "numeric", month: "short", year: "numeric" })}` : "";
+    return `${turer} · ${folk}${dato}`;
+  }
+  function sheetTilgangvalg(id) {
+    const x = (S.tilgangListe || []).find(k => k.id === id);
+    if (!x) return;
+    openSheet(`<h3>${esc(x.kunde)}</h3>
+      <p class="lede"><b class="mono" style="letter-spacing:.06em">${esc(x.kode)}</b><br>${esc(tilgangOmfang(x))} · ${esc(tilgangStatus(x))}</p>
+      <div class="gruppe"><div class="list">
+        <button class="listrow bar" data-copy="${esc(x.kode)}"><div class="grow"><div class="nm">Kopier koden</div></div></button>
+        <button class="listrow bar" data-tilgangaktiv="${esc(x.id)}" data-aapne="${x.aktiv ? "0" : "1"}"><div class="grow"><div class="nm"${x.aktiv ? ' style="color:var(--danger)"' : ""}>${x.aktiv ? "Steng koden" : "Åpne koden igjen"}</div></div></button>
+      </div></div>
+      <button class="btn close" data-close>Lukk</button>`);
+  }
 
+  /* Ny kode: to tall. 0 betyr ubegrenset, for begge. */
   function sheetNyTilgang() {
     openSheet(`<h3>Ny tilgangskode</h3>
       <form id="ntForm" novalidate>
         <div class="field"><label for="ntKunde">Kunde</label>
           <input id="ntKunde" maxlength="80" placeholder="Sandnes IL" autocomplete="off"></div>
-        <fieldset class="spm"><legend>Hvor mange turer?</legend>
-          <div class="picks to">
-            <label class="pick"><input type="radio" name="ntTurer" value="1" checked><span><b>Én tur</b></span></label>
-            <label class="pick"><input type="radio" name="ntTurer" value="fritt"><span><b>Ubegrenset</b></span></label>
-            <label class="pick"><input type="radio" name="ntTurer" value="antall"><span><b>Et antall</b></span></label>
-          </div>
-        </fieldset>
-        <div class="field" id="ntAntallFelt" hidden><label for="ntAntall">Antall turer</label>
-          <input id="ntAntall" type="number" min="1" max="1000" value="5"></div>
+        <div class="field"><label for="ntAntall">Antall turer</label>
+          <input id="ntAntall" type="number" min="0" max="1000" value="1"></div>
         <div class="field"><label for="ntPers">Maks personer per tur</label>
-          <input id="ntPers" type="number" min="2" max="2000" value="50"></div>
+          <input id="ntPers" type="number" min="0" max="2000" value="50"></div>
+        <p class="muted" style="font-size:13.5px;margin:-4px 0 14px">Skriv 0 for ubegrenset.</p>
         <div class="field"><label for="ntTil">Gjelder til (valgfritt)</label>
           <input id="ntTil" type="date"></div>
         <p class="err" id="ntErr" hidden></p>
         <button class="btn primary big" type="submit" id="ntLag">Lag koden</button>
       </form>
       <button class="btn close" data-close>Avbryt</button>`);
-    document.querySelectorAll('input[name="ntTurer"]').forEach(r => r.addEventListener("change", () => {
-      $("ntAntallFelt").hidden = document.querySelector('input[name="ntTurer"]:checked').value !== "antall";
-    }));
     $("ntForm").addEventListener("submit", async e => {
       e.preventDefault();
       const err = $("ntErr"), btn = $("ntLag");
       const vis = t => { err.textContent = t; err.hidden = false; };
       const kunde = $("ntKunde").value.trim();
-      const valg = document.querySelector('input[name="ntTurer"]:checked').value;
-      const maksTurer = valg === "fritt" ? null : valg === "1" ? 1 : parseInt($("ntAntall").value, 10);
-      const maksDeltakere = parseInt($("ntPers").value, 10);
+      const tall = id => { const v = $(id).value.trim(); return v === "" ? NaN : Number(v); };
+      const turer = tall("ntAntall"), pers = tall("ntPers");
       if (!kunde) return vis("Skriv hvem koden er til.");
-      if (maksTurer !== null && !(maksTurer >= 1 && maksTurer <= 1000)) return vis("Antall turer må være mellom 1 og 1000.");
-      if (!(maksDeltakere >= 2 && maksDeltakere <= 2000)) return vis("Personer per tur må være mellom 2 og 2000.");
+      if (!(Number.isInteger(turer) && turer >= 0 && turer <= 1000)) return vis("Antall turer må være et tall fra 0 til 1000.");
+      if (!(Number.isInteger(pers) && (pers === 0 || (pers >= 2 && pers <= 2000)))) return vis("Personer per tur må være 0, eller fra 2 til 2000.");
+      const maksTurer = turer === 0 ? null : turer;
+      const maksDeltakere = pers === 0 ? null : pers;
       btn.disabled = true; btn.innerHTML = prikker() + " Lager koden";
       try {
         const rad = await Api.lagTilgang({ kunde, maksTurer, maksDeltakere, gyldigTil: $("ntTil").value || null });
         closeSheet();
         await aapneTilgang(true);
-        melding(`Koden til ${kunde} er\n\n${rad.kode}\n\nTrykk på koden i lista for å kopiere den.`);
+        sheetTilgangvalg(rad.id);
       } catch (e2) { btn.disabled = false; btn.textContent = "Lag koden"; vis(e2.message); }
     });
   }
@@ -5472,59 +5812,92 @@ const UI = (() => {
      Målet er en velger mot den ekte appen. Finner den ingenting — en
      tur uten program har ingen dagsvelger — hopper steget over seg
      selv i stedet for å peke på ingenting. */
+  /* To slags steg. «vis» peker på noe og forklarer det, og du går videre
+     med Neste. «trykk» ber deg trykke på det selv: en fane, en rad, eller
+     fanen igjen for å komme tilbake. Da lærer fingeren veien, ikke bare
+     øynene. Steget er ferdig når appen står der trykket skulle føre deg.
+
+     Hvert «vis»-steg har en fane; står du et annet sted, bytter
+     omvisningen dit selv (bare når du går bakover eller starter fra Meg).
+     Et «trykk»-steg flytter deg aldri: det er du som trykker. */
+  const FANE = id => `#tabbar [data-tab="${id}"]`;
+  const PRAKTISK_RADER = ['[data-side="pakk"]', '[data-side="seter"]', '[data-side="kontakt"]',
+                          '[data-side="rom"]', '[data-side="dokumenter"]', '[data-side="opprop"]'];
   const OMVISNING = {
     leader: [
-      { tab: "program", maal: ".naakort",
+      { vis: ".naakort", tab: "program",
         h: "Her står det som skjer nå",
         t: "Punktet som pågår eller er neste, med adresse og en knapp rett til kartet." },
-      { tab: "program", maal: ".chips",
+      { vis: ".chips", tab: "program",
         h: "Bla mellom dagene her",
-        t: "Trykk på en dag, så bytter programmet under. Nå-kortet står bare på dagens dato." },
-      { tab: "program", maal: '[data-sheet="additem"]',
+        t: "Trykk på en dag, så bytter programmet under." },
+      { vis: '[data-sheet="additem"]', tab: "program",
         h: "Slik legger du inn et punkt",
-        t: "Tid, tittel og sted. Med et sted følger kart og vær. Har du heftet som PDF, leses hele programmet inn på en gang." },
-      { tab: "turen", maal: ".ordnes",
+        t: "Tid, tittel og sted. Har du heftet som PDF, leses hele programmet inn på en gang." },
+      { trykk: FANE("chat"), ferdig: () => S.tab === "chat" && !S.openChat,
+        h: "Trykk på Chat",
+        t: "Fanene nederst tar deg mellom de fire delene av appen." },
+      { vis: ".chatrow", tab: "chat",
+        h: "Hver chat har sin rad",
+        t: "Trykk på en for å skrive. Med Ny chat nederst lager du en chat for en del av gruppa." },
+      { trykk: FANE("turen"), ferdig: () => S.tab === "turen" && !S.side,
+        h: "Trykk på Turen",
+        t: "Alt det praktiske for turen ligger her." },
+      { vis: ".ordnes", tab: "turen",
         h: "Appen sier hva som mangler",
-        t: "Et sted uten adresse, en dag uten hotell — det dukker opp her. Er det unødvendig, krysser du det av." },
-      { tab: "turen", maal: '[data-side="seter"]',
-        h: "Sitteplasser, ett kjøretøy av gangen",
-        t: "Hvert kjøretøy har sin dag og sitt kart. Du bestemmer om deltakerne velger selv, eller om du fordeler." },
-      { tab: "turen", maal: '[data-side="rom"]',
-        h: "Rom virker på samme måte",
-        t: "Legg inn rommene, eller lim inn romlista fra Excel. To brytere styrer om deltakerne kan flytte seg." },
-      { tab: "turen", maal: '[data-side="kontakt"]',
-        h: "Telefonnumre ligger her",
-        t: "Deg, de andre reiselederne og et nummer hjemme. Ett trykk for å ringe, og det virker uten nett." },
-      { tab: "turen", maal: '[data-side="opprop"]',
-        h: "Opprop på rasteplassen",
-        t: "Hak av navnene. De som mangler står øverst. Bare reiseledere ser lista." },
-      { tab: "turen", maal: "[data-copy]",
+        t: "Et sted uten adresse, en dag uten hotell. Er det unødvendig, trykker du det bort." },
+      { trykk: PRAKTISK_RADER, side: true,
+        h: el => `Trykk på ${radnavn(el)}`,
+        t: "Radene her åpner en egen side." },
+      { trykk: FANE("turen"), tilbake: true, ferdig: () => S.tab === "turen" && !S.side,
+        h: "Trykk på Turen for å gå tilbake",
+        t: "Fanen tar deg alltid tilbake til starten. Du kan også dra fra venstre kant av skjermen." },
+      { vis: '[data-side="turkode"]', tab: "turen",
         h: "Turkoden slipper folk inn",
-        t: "Del den med gruppa. Kommer den ut til flere enn den skulle, lager du en ny under." }
+        t: "Her kopierer du koden, viser QR-koden eller sender lenken til gruppa." },
+      { trykk: FANE("meg"), ferdig: () => S.tab === "meg" && !S.side,
+        h: "Trykk på Meg",
+        t: "Navnet ditt, turene dine og innstillingene." },
+      { vis: '[data-sheet="omvisning"]', tab: "meg",
+        h: "Omvisningen ligger her",
+        t: "Vil du se den igjen, starter du den herfra." }
     ],
     member: [
-      { tab: "program", maal: ".naakort",
+      { vis: ".naakort", tab: "program",
         h: "Her står det som skjer nå",
         t: "Punktet som pågår eller er neste, med adresse og en knapp rett til kartet." },
-      { tab: "program", maal: ".chips",
+      { vis: ".chips", tab: "program",
         h: "Bla mellom dagene her",
         t: "Trykk på en dag for å se programmet for den." },
-      { tab: "program", maal: ".tl .ev",
+      { vis: ".tl .ev", tab: "program",
         h: "Trykk på et punkt for detaljene",
-        t: "Adresse, kart og vær. Har punktet påmelding, melder du deg på herfra." },
-      { tab: "turen", maal: '[data-side="pakk"]',
-        h: "Pakkelista er din egen",
-        t: "Du krysser av for deg selv, og ingen andre ser det. Egne ting legger du til nederst." },
-      { tab: "turen", maal: '[data-side="seter"]',
-        h: "Plassen din i bussen",
-        t: "Velg plass, eller se hvilken du har fått. Vil du sitte et annet sted, spør du den som sitter der." },
-      { tab: "turen", maal: '[data-side="kontakt"]',
-        h: "Telefonnumre ligger her",
-        t: "Reiselederne og et nummer hjemme, ett trykk unna. Lista virker uten nett." },
-      { tab: "meg", maal: '[data-sheet="varsler"]',
+        t: "Adresse, kart og vær. Har punktet påmelding, melder du deg på derfra." },
+      { trykk: FANE("chat"), ferdig: () => S.tab === "chat" && !S.openChat,
+        h: "Trykk på Chat",
+        t: "Fanene nederst tar deg mellom de fire delene av appen." },
+      { vis: ".chatrow", tab: "chat",
+        h: "Hver chat har sin rad",
+        t: "Trykk på en for å lese og skrive." },
+      { trykk: FANE("turen"), ferdig: () => S.tab === "turen" && !S.side,
+        h: "Trykk på Turen",
+        t: "Alt det praktiske for turen ligger her." },
+      { trykk: PRAKTISK_RADER, side: true,
+        h: el => `Trykk på ${radnavn(el)}`,
+        t: "Radene her åpner en egen side." },
+      { trykk: FANE("turen"), tilbake: true, ferdig: () => S.tab === "turen" && !S.side,
+        h: "Trykk på Turen for å gå tilbake",
+        t: "Fanen tar deg alltid tilbake til starten. Du kan også dra fra venstre kant av skjermen." },
+      { trykk: FANE("meg"), ferdig: () => S.tab === "meg" && !S.side,
+        h: "Trykk på Meg",
+        t: "Navnet ditt, turene dine og innstillingene." },
+      { vis: '[data-sheet="varsler"]', tab: "meg",
         h: "Slå på varsler her",
         t: "Uten varsler er telefonen stille når reiselederen skriver noe viktig." }
     ]
+  };
+  const radnavn = el => {
+    const nm = el && el.querySelector(".nm");
+    return nm ? nm.textContent.trim() : "raden";
   };
 
   const omvisningNokkel = rolle => "tk.omvisning." + rolle;
@@ -5535,30 +5908,59 @@ const UI = (() => {
   }
 
   const omvisRolle = () => (S.trip && S.trip.role === "leader" ? "leader" : "member");
-  const omvisSteg = () => (S.omvis ? OMVISNING[S.omvis.rolle][S.omvis.i] : null);
+  const omvisSteg = () => (S.omvis ? S.omvis.steg[S.omvis.i] : null);
+
+  /* Hvilke steg denne turen har. En tur uten program har ingen
+     dagsvelger, og en tur uten Praktisk har ingen rad å trykke på. Det
+     finner vi ut før vi begynner, ved å tegne fanene uten å vise dem —
+     så telleren sier «1 av 9» og ikke hopper fra 2 til 4. */
+  function omvisStegFor(rolle) {
+    const tegnet = {};
+    const finn = (tab, sel) => {
+      if (!tegnet[tab]) {
+        const d = document.createElement("div");
+        try { d.innerHTML = visningFor(tab); } catch { /* tom fane */ }
+        tegnet[tab] = d;
+      }
+      return (Array.isArray(sel) ? sel : [sel]).some(x => tegnet[tab].querySelector(x));
+    };
+    const ut = [];
+    let forrigeSide = false;
+    for (const st of OMVISNING[rolle]) {
+      if (st.vis && !finn(st.tab, st.vis)) continue;
+      if (st.side) { forrigeSide = finn("turen", st.trykk); if (!forrigeSide) continue; }
+      if (st.tilbake && !forrigeSide) continue;
+      ut.push(st);
+    }
+    return ut;
+  }
 
   function startOmvisning() {
     const rolle = omvisRolle();
     try { localStorage.setItem(omvisningNokkel(rolle), "1"); } catch { /* uviktig */ }
     closeSheet();
-    S.omvis = { rolle, i: 0 };
-    gaaTilOmvisSteg(0);
+    const steg = omvisStegFor(rolle);
+    if (!steg.length) return;
+    S.omvis = { rolle, i: 0, steg };
+    gaaTilOmvisSteg(0, true);
   }
 
   function avsluttOmvisning() {
     S.omvis = null;
     $("omvis").hidden = true;
+    $("omvis").classList.remove("slipp");
     render();
   }
 
-  /* Hvert steg kan bytte fane. Da må alt som ligger over fanen lukkes
-     først — står et ark åpent, peker ringen på noe bak det. */
-  function gaaTilOmvisSteg(i) {
-    const liste = OMVISNING[S.omvis.rolle];
+  /* Et «vis»-steg bytter til sin fane når du går bakover eller starter
+     et annet sted. Går du framover, står du alt der: forrige steg ba
+     deg trykke deg dit. */
+  function gaaTilOmvisSteg(i, flytt) {
+    const liste = S.omvis.steg;
     if (i < 0 || i >= liste.length) return avsluttOmvisning();
     S.omvis.i = i;
     const steg = liste[i];
-    if (steg.tab && (S.tab !== steg.tab || S.side || S.openChat)) {
+    if (steg.vis && (flytt || S.tab !== steg.tab) && (S.tab !== steg.tab || S.side || S.openChat)) {
       S.side = null;
       S.openChat = null;
       S.tab = steg.tab;
@@ -5566,72 +5968,92 @@ const UI = (() => {
     render();
   }
 
+  // Elementet steget peker på. Et «trykk»-steg kan ha flere kandidater
+  // (den første raden under Praktisk som finnes).
+  function omvisMaal(steg) {
+    const sel = steg.vis || steg.trykk;
+    for (const x of (Array.isArray(sel) ? sel : [sel])) {
+      const el = $("screen").querySelector(x) || document.querySelector(x);
+      if (el) return el;
+    }
+    return null;
+  }
+
   /* Tegner ringen og kortet etter at skjermen er ferdig. Måler den ekte
-     knappen, så markeringen sitter der knappen faktisk er — ikke der vi
-     trodde den skulle være da teksten ble skrevet. */
+     knappen, så markeringen sitter der knappen faktisk er. */
   function tegnOmvisning() {
     const lag = $("omvis");
     const steg = omvisSteg();
-    if (!steg) { lag.hidden = true; return; }
+    if (!steg) { lag.hidden = true; lag.classList.remove("slipp"); return; }
 
-    const liste = OMVISNING[S.omvis.rolle];
-    // Et steg som peker på noe som ikke finnes på denne turen (et tomt
-    // program har ingen «nå»-boks), hoppes over i den retningen du går.
-    // Før forklarte omvisningen en boks som ikke var der.
-    if (steg.maal && !($("screen").querySelector(steg.maal) || document.querySelector(steg.maal))) {
-      const r = S.omvis.retning || 1;
-      const neste = S.omvis.i + r;
-      if (neste < 0) { S.omvis.retning = 1; return gaaTilOmvisSteg(S.omvis.i + 1); }
-      return gaaTilOmvisSteg(neste);
+    // Har du alt gjort det steget ber om, går vi videre av oss selv.
+    if (steg.trykk && (steg.side ? (S.side && S.side !== "turkode") : steg.ferdig())) {
+      return setTimeout(() => { if (omvisSteg() === steg) gaaTilOmvisSteg(S.omvis.i + 1); }, steg.side ? 450 : 250);
     }
-    const siste = S.omvis.i === liste.length - 1;
-    lag.hidden = false;
+    const maal = omvisMaal(steg);
+    // Finnes ikke målet likevel (noe endret seg underveis), hopper vi over.
+    if (!maal) return gaaTilOmvisSteg(S.omvis.i + 1);
 
+    const liste = S.omvis.steg;
+    const siste = S.omvis.i === liste.length - 1;
+    const forrige = liste[S.omvis.i - 1];
+    // Tilbake gir bare mening mellom to «vis»-steg på samme fane.
+    const kanTilbake = steg.vis && forrige && forrige.vis && forrige.tab === steg.tab;
+    lag.hidden = false;
+    lag.classList.toggle("slipp", Boolean(steg.trykk));
+
+    const h = typeof steg.h === "function" ? steg.h(maal) : steg.h;
     $("omvisKort").innerHTML = `
       <p class="omvis-teller">Omvisning · ${S.omvis.i + 1} av ${liste.length}</p>
-      <h3>${esc(steg.h)}</h3>
+      <h3>${esc(h)}</h3>
       <p>${esc(steg.t)}</p>
-      <div class="omvis-knapper">
-        ${S.omvis.i ? `<button class="btn" data-omvis="forrige">Tilbake</button>` : ""}
+      ${steg.trykk ? "" : `<div class="omvis-knapper">
+        ${kanTilbake ? `<button class="btn" data-omvis="forrige">Tilbake</button>` : ""}
         <button class="btn primary" data-omvis="neste">${siste ? "Ferdig" : "Neste"}</button>
-      </div>
-      ${siste ? "" : `<button class="linkbtn omvis-hopp" data-omvis="slutt">Hopp over resten</button>`}`;
+      </div>`}
+      ${siste ? "" : `<button class="linkbtn omvis-hopp" data-omvis="slutt">Avslutt omvisningen</button>`}`;
 
-    plasserOmvisning(steg);
+    plasserOmvisning(maal);
+  }
+
+  /* Under et «trykk»-steg slipper laget trykk gjennom, men bare til det
+     ringen peker på og til kortet. Alt annet stoppes her, før appen ser
+     det — ellers kunne et bomtrykk sende deg et helt annet sted. */
+  for (const type of ["pointerdown", "touchstart", "click"]) {
+    document.addEventListener(type, e => {
+      const steg = omvisSteg();
+      if (!steg || !steg.trykk) return;
+      const maal = omvisMaal(steg);
+      if (e.target.closest && (e.target.closest("#omvisKort") || (maal && maal.contains(e.target)))) return;
+      e.stopPropagation();
+      if (type === "click") e.preventDefault();
+    }, { capture: true, passive: type !== "click" });
   }
 
   /* Ringen legges rundt målet, og kortet på den siden det er plass.
      Er målet utenfor skjermen, rulles det fram først — og da må vi måle
      en gang til, for det har nettopp flyttet seg. */
-  function plasserOmvisning(steg, andreForsok) {
+  function plasserOmvisning(maal, andreForsok) {
     const ring = $("omvisRing"), kort = $("omvisKort"), app = $("appScreen");
-    const maal = steg.maal ? $("screen").querySelector(steg.maal)
-                          || document.querySelector(steg.maal) : null;
-
-    // Ingenting å peke på — en tur uten program har ingen dagsvelger.
-    // Da er steget uten mening, og vi går videre i stedet for å dimme
-    // skjermen rundt et tomrom.
-    if (!maal) {
-      ring.classList.add("tom");
-      ring.removeAttribute("style");
-      kort.classList.add("midt");
-      kort.style.top = ""; kort.style.bottom = "";
-      return;
-    }
     ring.classList.remove("tom");
     kort.classList.remove("midt");
 
-    const sk = $("screen").getBoundingClientRect();
-
-    /* Ligger målet utenfor det synlige feltet, rulles det fram først.
-       Rullingen skjer med en gang, så målingen under gjelder den nye
-       posisjonen. Bare ett forsøk: ruller vi i ring, står omvisningen
-       fast og knappene svarer ikke. */
-    if (!andreForsok) {
+    /* Ligger målet i skjermen, men utenfor det synlige feltet, rulles det
+       fram først. Fanelinja flyter over bunnen av skjermen, så det som
+       ligger bak den, regnes som utenfor. Bare ett forsøk: ruller vi i
+       ring, står omvisningen fast. */
+    const sk = $("screen");
+    if (!andreForsok && sk.contains(maal)) {
+      const s = sk.getBoundingClientRect();
+      const bar = $("tabbar");
+      const bunn = bar && !bar.hidden ? Math.min(s.bottom, bar.getBoundingClientRect().top) : s.bottom;
       const f = maal.getBoundingClientRect();
-      if (f.top < sk.top + 8 || f.bottom > sk.bottom - 8) {
-        maal.scrollIntoView({ block: "center", behavior: "auto" });
-        return plasserOmvisning(steg, true);
+      if (f.top < s.top + 8 || f.bottom > bunn - 12) {
+        const midt = (bunn - s.top) / 2;
+        // «instant»: skjermen kan ha myk rulling, og da ville målingen
+        // under skjedd før rullingen var ferdig.
+        sk.scrollTo({ top: sk.scrollTop + (f.top + f.height / 2) - (s.top + midt), behavior: "instant" });
+        return plasserOmvisning(maal, true);
       }
     }
 
@@ -5644,10 +6066,8 @@ const UI = (() => {
     ring.style.height = (r.height + luft * 2) + "px";
 
     /* Kortet legger seg på den siden av ringen der det får plass. Får
-       det plass på begge, velger vi under — da leser man nedover, slik
-       man gjør ellers. Får det plass på ingen av dem, legger det seg
-       der det er mest rom og klemmes inn på skjermen; ringen kan da
-       ligge delvis bak kortet, men teksten er det viktigste. */
+       det plass på begge, velger vi under. Får det plass på ingen av dem,
+       legger det seg der det er mest rom. */
     const h = kort.getBoundingClientRect().height || 240;
     const marg = 14, kant = 10;
     const over = (r.top - a.top) - marg - kant;
@@ -5698,36 +6118,34 @@ const UI = (() => {
     const typ = k ? (TYPER[k.typ] ? k.typ : "annet") : "buss";
     const typer = Object.entries(TYPER);
     const dager = S.trip.days;
+    // Vanlig antall plasser for hver type. Fylles inn når du bytter type,
+    // så lenge du ikke har skrevet et tall selv.
+    const VANLIG = { buss: 56, minibuss: 16, bil: 5, tog: 64, annet: 20 };
     openSheet(`<h3>${k ? "Endre kjøretøy" : "Nytt kjøretøy"}</h3>
-      <p class="lede">Typen bestemmer hvor bredt kartet står, hvor midtgangen går,
-        og hva en plass heter. Et tog nummererer 41, 42, 43 — en buss 12A, 12B.</p>
       <form id="kjForm">
-        <div class="field"><label for="kjNavn">Navn</label>
-          <input id="kjNavn" type="text" maxlength="40" placeholder="Buss 1"
-            value="${k ? esc(k.navn) : ""}" autocomplete="off"></div>
-        <div class="field"><label for="kjTyp">Type</label>
-          <select id="kjTyp" class="select">
-            ${typer.map(([v, o]) =>
-              `<option value="${v}"${v === typ ? " selected" : ""}>${o.navn} — ${o.bredde} i bredden</option>`).join("")}
-          </select></div>
-        <div class="field"><label for="kjAnt">Antall plasser</label>
-          <input id="kjAnt" type="number" min="1" max="400" inputmode="numeric" value="${k ? k.plasser : 56}">
+        <div class="segment valg" role="radiogroup" aria-label="Type">
+          ${typer.map(([v, o]) => `<label><input type="radio" name="kjTyp" value="${v}"${v === typ ? " checked" : ""}>${esc(o.navn.replace(" (vogn)", ""))}</label>`).join("")}
         </div>
-        <div class="field"><label for="kjBak">Ekstra plasser bakerst</label>
-          <select id="kjBak" class="select">
-            ${[0, 1, 2, 3].map(n => `<option value="${n}"${(k ? k.bakerst : 0) === n ? " selected" : ""}>${
-              n === 0 ? "Like mange hele veien" : `${n} mer på bakerste rad`}</option>`).join("")}
-          </select></div>
+        <div class="field"><label for="kjNavn">Navn</label>
+          <input id="kjNavn" type="text" maxlength="40" placeholder="${esc(TYPER[typ].navn.replace(" (vogn)", ""))} 1"
+            value="${k ? esc(k.navn) : ""}" autocomplete="off"></div>
+        <div class="feltpar">
+          <div class="field"><label for="kjAnt">Plasser</label>
+            <input id="kjAnt" type="number" min="1" max="400" value="${k ? k.plasser : VANLIG[typ]}"></div>
+          ${k ? "" : `<div class="field"><label for="kjHvorMange">Hvor mange</label>
+            <input id="kjHvorMange" type="number" min="1" max="60" value="1"></div>`}
+        </div>
+        ${k ? "" : `<p class="muted" style="margin:-6px 0 14px;font-size:13px">Skriver du «Bil» og 7, får du Bil 1 til Bil 7.</p>`}
         ${dager.length ? `<div class="field"><label for="kjDato">Hvilken dag</label>
           <select id="kjDato" class="select">
             <option value="">Hele turen</option>
             ${dager.map(d => `<option value="${esc(d.date)}"${k && k.dato === d.date ? " selected" : ""}>${esc(cap(d.label))}</option>`).join("")}
           </select></div>` : ""}
-        ${k ? "" : `<div class="field"><label for="kjHvorMange">Hvor mange like kjøretøy?</label>
-          <input id="kjHvorMange" type="number" min="1" max="60" inputmode="numeric" value="1">
-          </div>
-          <p class="muted" style="margin:-6px 0 14px;font-size:13px">Sju biler: skriv «Bil» og 7.
-            Du får Bil 1 til Bil 7, alle med samme oppsett.</p>`}
+        <div class="field"${typ === "bil" || typ === "tog" ? " hidden" : ""}><label for="kjBak">Bakerste rad</label>
+          <select id="kjBak" class="select">
+            ${[0, 1, 2, 3].map(n => `<option value="${n}"${(k ? k.bakerst : 0) === n ? " selected" : ""}>${
+              n === 0 ? "Like mange som de andre" : `${n} plass${n === 1 ? "" : "er"} mer`}</option>`).join("")}
+          </select></div>
         ${k ? `<div class="gruppe" style="margin-bottom:14px"><div class="list">
           <label class="listrow" style="cursor:pointer">
             <div class="grow"><div class="nm">Deltakerne velger selv</div>
@@ -5757,6 +6175,16 @@ const UI = (() => {
     };
     forklar();
     if ($("kjFritt")) { $("kjFritt").addEventListener("change", forklar); $("kjGodkjenn").addEventListener("change", forklar); }
+    let egetTall = Boolean(k);
+    $("kjAnt").addEventListener("input", () => { egetTall = true; });
+    document.querySelectorAll('input[name="kjTyp"]').forEach(r => r.addEventListener("change", () => {
+      const v = document.querySelector('input[name="kjTyp"]:checked').value;
+      if (!egetTall) $("kjAnt").value = VANLIG[v];
+      $("kjNavn").placeholder = TYPER[v].navn.replace(" (vogn)", "") + " 1";
+      // Ekstra plasser bakerst finnes bare der det er en bakerste benk.
+      const bak = $("kjBak").closest(".field");
+      if (bak) bak.hidden = v === "bil" || v === "tog";
+    }));
 
     $("kjForm").addEventListener("submit", async e => {
       e.preventDefault();
@@ -5772,7 +6200,7 @@ const UI = (() => {
         err.textContent = "Antall kjøretøy må være mellom 1 og 60."; err.hidden = false; return;
       }
       const felter = {
-        navn, typ: $("kjTyp").value, plasser,
+        navn, typ: document.querySelector('input[name="kjTyp"]:checked').value, plasser,
         bakerst: parseInt($("kjBak").value, 10) || 0,
         dato: $("kjDato") ? ($("kjDato").value || null) : null
       };
@@ -5800,10 +6228,11 @@ const UI = (() => {
     const antallMed = (folk || []).filter(p => !p.skjult).length;
     const topp = `
       ${leder && S.trip.maksDeltakere && folk ? `<p class="muted" style="margin:0">${antallMed} av ${S.trip.maksDeltakere} plasser er tatt.</p>` : ""}
-      ${leder ? `<label class="pick" style="margin-top:4px">
+      ${leder ? `<label class="bryterrad" style="margin-top:4px">
+        <span class="grow"><b>Krev godkjenning</b>
+          <small>Nye deltakere må slippes inn av en reiseleder.</small></span>
         <input type="checkbox" id="krevGodkjenning" ${S.trip.krevGodkjenning ? "checked" : ""}>
-        <span><b>Krev godkjenning for å bli med</b><br>
-          <small>Nye deltakere må slippes inn av en reiseleder. Turkoden alene holder ikke.</small></span>
+        <span class="bryter" aria-hidden="true"></span>
       </label>` : ""}`;
 
     if (S.folkFeil) return `<div>${topp}</div><p class="muted">Klarte ikke hente deltakerlista.</p>`;
@@ -5811,42 +6240,68 @@ const UI = (() => {
 
     const ventende = folk.filter(p => p.venter);
     const med = folk.filter(p => !p.venter);
-    const ledere = med.filter(p => p.role === "leader");
+    const visPaar = leder && har("paaroerende") && S.paar;
+
+    // Én linje under navnet: rollen, og for reiselederen om pårørende
+    // mangler. Valgene for personen ligger bak ⋯, som i Kontakter.
+    const underlinje = p => {
+      const biter = [];
+      if (p.me) biter.push("Deg");
+      if (p.role === "leader") biter.push("Reiseleder");
+      if (visPaar) {
+        const pr = S.paar.get(p.id);
+        biter.push(pr ? `Pårørende: ${esc(pr.navn)}` : `<span style="color:var(--amber)">Mangler pårørende</span>`);
+      }
+      return biter.join(" · ");
+    };
 
     return `
       <div>${topp}</div>
 
       ${ventende.length ? `<div>
-        <div class="eyebrow" style="margin-bottom:8px;color:var(--amber)">Venter på svar · ${ventende.length}</div>
-        <div class="memberlist">${ventende.map(p => `
-          <div class="person">
-            <span>${esc(p.name)}</span>
-            <span style="display:flex;gap:10px;flex:none">
-              <button class="linkbtn" data-godkjenn="${esc(p.id)}">slipp inn</button>
-              <button class="linkbtn" style="color:var(--danger)" data-avvis="${esc(p.id)}">avvis</button>
-            </span>
-          </div>`).join("")}</div>
+        <div class="eyebrow" style="margin-bottom:8px;color:var(--amber)">Venter på å bli sluppet inn · ${ventende.length}</div>
+        <div class="gruppe"><div class="list">${ventende.map(p => `
+          <div class="listrow deltrad">
+            <span class="megava liten">${esc(initialer(p.name))}</span>
+            <div class="grow"><div class="nm">${esc(p.name)}</div></div>
+            <button class="pilleknapp" data-avvis="${esc(p.id)}">Avvis</button>
+            <button class="pilleknapp fylt" data-godkjenn="${esc(p.id)}">Slipp inn</button>
+          </div>`).join("")}</div></div>
       </div>` : ""}
 
       <div>
         <div class="eyebrow" style="margin-bottom:8px">Med på turen · ${med.length}</div>
-        <div class="memberlist">${med.map(p => `
-          <div class="person">
-            <span>${esc(p.name)}${p.me ? " <em>deg</em>" : ""}${p.role === "leader" ? ' <em>reiseleder</em>' : ""}${
-              leder && S.paar ? (S.paar.get(p.id)
-                ? `<br><small>Pårørende: ${esc(S.paar.get(p.id).navn)} · <a href="tel:${esc(telnummer(S.paar.get(p.id).telefon))}">${esc(S.paar.get(p.id).telefon)}</a></small>`
-                : `<br><small style="color:var(--amber)">Mangler pårørende</small>`) : ""}</span>
-            ${leder && !p.me && !p.skjult ? `<span style="display:flex;gap:10px;flex:none">
-              ${p.role === "leader"
-                ? (ledere.length > 1 ? `<button class="linkbtn" data-rolle="${esc(p.id)}" data-til="member">fjern rolle</button>` : "")
-                : `<button class="linkbtn" data-rolle="${esc(p.id)}" data-til="leader">gjør til leder</button>`}
-              <button class="linkbtn" data-rettnavn="${esc(p.id)}" data-navn="${esc(p.name)}">rett navn</button>
-              <button class="linkbtn" style="color:var(--danger)" data-fjern="${esc(p.id)}" data-navn="${esc(p.name)}">fjern</button>
-            </span>` : ""}
-          </div>`).join("")}</div>
-
+        <div class="gruppe"><div class="list">${med.map(p => {
+          const valg = leder && !p.me && !p.skjult;
+          const sub = underlinje(p);
+          return `<div class="listrow deltrad">
+            <span class="megava liten">${esc(initialer(p.name))}</span>
+            <div class="grow"><div class="nm">${esc(p.name)}</div>${sub ? `<div class="sub">${sub}</div>` : ""}</div>
+            ${visPaar && !p.me && S.paar.get(p.id) ? `<a class="rundknapp" href="tel:${esc(telnummer(S.paar.get(p.id).telefon))}" aria-label="Ring pårørende til ${esc(p.name)}">${ICON.telefon}</a>` : ""}
+            ${valg ? `<button class="rundknapp" data-personvalg="${esc(p.id)}" aria-label="Valg for ${esc(p.name)}">${ICON.mer}</button>` : ""}
+          </div>`;
+        }).join("")}</div></div>
       </div>`;
   }
+
+  /* Valgene for én deltaker, som et handlingsark i iOS: det vanlige
+     øverst, det som ikke kan angres nederst og i rødt. */
+  function sheetPersonvalg(id) {
+    const p = (S.folk || []).find(x => x.id === id);
+    if (!p) return;
+    const ledere = (S.folk || []).filter(x => !x.venter && x.role === "leader");
+    openSheet(`<h3>${esc(p.name)}</h3>
+      <div class="gruppe"><div class="list">
+        ${p.role === "leader"
+          ? (ledere.length > 1 ? `<button class="listrow bar" data-rolle="${esc(p.id)}" data-til="member"><div class="grow"><div class="nm">Fjern som reiseleder</div></div></button>` : "")
+          : `<button class="listrow bar" data-rolle="${esc(p.id)}" data-til="leader"><div class="grow"><div class="nm">Gjør til reiseleder</div></div></button>`}
+        <button class="listrow bar" data-rettnavn="${esc(p.id)}" data-navn="${esc(p.name)}"><div class="grow"><div class="nm">Rett navn</div></div></button>
+        <button class="listrow bar" data-fjern="${esc(p.id)}" data-navn="${esc(p.name)}"><div class="grow"><div class="nm" style="color:var(--danger)">Fjern fra turen</div></div></button>
+      </div></div>
+      <button class="btn close" data-close>Avbryt</button>`);
+  }
+  const initialer = navn => String(navn || "").split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join("").toUpperCase() || "–";
+
   /* ───────────────── innlogging med e-post ─────────────────
      Egen side, ikke et ark: skjemaet er kort, men tastaturet tar halve
      skjermen på telefon, og i et ark lå overskriften under draghåndtaket.
@@ -6064,6 +6519,13 @@ const UI = (() => {
 
   function lukkSide(fraHistorikk) {
     if (!S.side) return false;
+    // Fra ett kjøretøy går tilbake til lista over kjøretøy, ikke ut.
+    if (S.side === "seter" && S.seteKj) {
+      S.seteKj = null;
+      render();
+      if (!fraHistorikk && history.state && history.state.kj) gaaTilbake();
+      return true;
+    }
     const forrige = S.side;
     S.side = null;
     if (forrige === "pakk" || forrige === "seter") hentMegTall(true);
@@ -6600,7 +7062,7 @@ const UI = (() => {
   });
 
   document.addEventListener("click", async e => {
-    const t = e.target.closest("[data-tab],[data-side],[data-pakk],[data-slettpakk],[data-sete],[data-setevalg],[data-nykj],[data-endrekj],[data-slettkj],[data-vaerigjen],[data-svarbytte],[data-avgjorbytte],[data-trekkbytte],[data-nyttrom],[data-endrerom],[data-slettrom],[data-fyllrom],[data-fyllalle],[data-settrom],[data-romvalg],[data-utavrom],[data-bytterom],[data-svarrombytte],[data-avgjorrombytte],[data-trekkrombytte],[data-nykontakt],[data-endrekontakt],[data-slettkontakt],[data-nyttopprop],[data-hake],[data-lukkopprop],[data-omvis],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-iprog],[data-taned],[data-romliste],[data-angrerom],[data-fjernres],[data-rettnavn],[data-utsett],[data-startopprop],[data-seteliste],[data-fyllseter],[data-kalender],[data-aapnedok],[data-slettdok],[data-soktreff],[data-delitem],[data-delday],[data-delmsg],[data-rapporter],[data-blokker],[data-opphevblokk],[data-rappslett],[data-rappfjern],[data-rappferdig],[data-tilgangaktiv],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-msgmeny],[data-chat],[data-paa],[data-slettchat],[data-bilde],[data-slettbilde],[data-bvlukk],[data-bvmeny],[data-lagrebilde],[data-kopimeld],[data-deltekst],[data-chatside],[data-cmadd],[data-cmdel],[data-cmleave],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn,#skjulInstall,#installKnapp");
+    const t = e.target.closest("[data-tab],[data-side],[data-kjside],[data-pakk],[data-slettpakk],[data-sete],[data-setevalg],[data-nykj],[data-endrekj],[data-slettkj],[data-vaerigjen],[data-svarbytte],[data-avgjorbytte],[data-trekkbytte],[data-nyttrom],[data-endrerom],[data-slettrom],[data-fyllrom],[data-fyllalle],[data-settrom],[data-romvalg],[data-utavrom],[data-bytterom],[data-svarrombytte],[data-avgjorrombytte],[data-trekkrombytte],[data-nykontakt],[data-endrekontakt],[data-slettkontakt],[data-nyttopprop],[data-hake],[data-lukkopprop],[data-omvis],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-turkode],[data-edit],[data-iprog],[data-taned],[data-romliste],[data-angrerom],[data-fjernres],[data-rettnavn],[data-personvalg],[data-utsett],[data-startopprop],[data-seteliste],[data-fyllseter],[data-kalender],[data-aapnedok],[data-slettdok],[data-soktreff],[data-delitem],[data-delday],[data-delmsg],[data-rapporter],[data-blokker],[data-opphevblokk],[data-rappslett],[data-rappfjern],[data-rappferdig],[data-tilgangaktiv],[data-tilgangvalg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-msgmeny],[data-chat],[data-paa],[data-slettchat],[data-bilde],[data-slettbilde],[data-bvlukk],[data-bvmeny],[data-lagrebilde],[data-kopimeld],[data-deltekst],[data-chatside],[data-cmadd],[data-cmdel],[data-cmleave],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn,#skjulInstall,#installKnapp");
     if (!t) return;
 
     if (t.id === "joinTilbake") { S.fraStart = false; return visAuth("start"); }
@@ -6681,14 +7143,22 @@ const UI = (() => {
     }
 
     if (t.dataset.copy) {
-      try { await navigator.clipboard.writeText(t.dataset.copy); toast("Turkoden er kopiert."); }
-      catch { toast("Kopiering ble blokkert — merk koden manuelt."); }
+      const hva = S.side === "tilgang" ? "Tilgangskoden" : "Turkoden";
+      try { await kopier(t.dataset.copy); toast(hva + " er kopiert."); haptikk(); }
+      catch { toast("Fikk ikke kopiert. Hold fingeren på koden og velg Kopier."); }
+      return;
+    }
+    if (t.dataset.turkode === "del") return delTurlenke();
+    if (t.dataset.turkode === "lenke") {
+      try { await kopier(turlenke()); toast("Lenken er kopiert."); haptikk(); }
+      catch { toast("Fikk ikke kopiert lenken."); }
       return;
     }
 
     if (t.dataset.opentrip) { closeSheet(); S.tab = "program"; return openTrip(t.dataset.opentrip).catch(() => toast("Klarte ikke åpne turen.")); }
     if (t.dataset.tab) return byttFane(t.dataset.tab);
 
+    if (t.dataset.kjside) return aapneKjoretoy(t.dataset.kjside);
     if (t.dataset.side) {
       closeSheet();
       if (t.dataset.side === "pakk") return aapnePakk();
@@ -6697,6 +7167,7 @@ const UI = (() => {
       if (t.dataset.side === "opprop") return aapneOpprop();
       if (t.dataset.side === "dokumenter") return aapneDokumenter();
       if (t.dataset.side === "tilgang") return aapneTilgang();
+      if (t.dataset.side === "turkode") return aapneTurkode();
       return aapneSeter();
     }
 
@@ -6871,8 +7342,7 @@ const UI = (() => {
       const v = t.dataset.omvis;
       if (v === "slutt") return avsluttOmvisning();
       if (!S.omvis) return;
-      S.omvis.retning = v === "forrige" ? -1 : 1;
-      return gaaTilOmvisSteg(S.omvis.i + S.omvis.retning);
+      return gaaTilOmvisSteg(S.omvis.i + (v === "forrige" ? -1 : 1), v === "forrige");
     }
 
     // ───── nødnummer ─────
@@ -7000,6 +7470,7 @@ const UI = (() => {
       return;
     }
     if (t.dataset.rettnavn) return sheetRettNavn(t.dataset.rettnavn, t.dataset.navn);
+    if (t.dataset.personvalg) return sheetPersonvalg(t.dataset.personvalg);
     if (t.dataset.angrerom) {
       try { await Api.angreRomplass(t.dataset.angrerom); await aapneRom(true); toast("Sengen er ledig igjen."); }
       catch (err) { toast(err.message || "Klarte ikke angre."); }
@@ -7082,6 +7553,7 @@ const UI = (() => {
 
     // Deltakersiden: roller, godkjenning og fjerning.
     if (t.dataset.rolle || t.dataset.godkjenn || t.dataset.avvis || t.dataset.fjern) {
+      if (t.dataset.rolle) closeSheet();
       // Å fjerne noen er ikke til å angre på, så vi spør først. Meldingene
       // deres blir stående, men tilgangen forsvinner med én gang.
       if (t.dataset.fjern &&
@@ -7111,8 +7583,8 @@ const UI = (() => {
     }
     if (t.dataset.kopimeld) {
       closeSheet();
-      try { await navigator.clipboard.writeText(t.dataset.kopimeld); toast("Teksten er kopiert."); }
-      catch { toast("Kopiering ble blokkert."); }
+      try { await kopier(t.dataset.kopimeld); toast("Teksten er kopiert."); }
+      catch { toast("Fikk ikke kopiert teksten."); }
       return;
     }
 
@@ -7142,7 +7614,7 @@ const UI = (() => {
       return;
     }
 
-    if (t.dataset.paa) {
+    if (t.dataset.paa && !t.dataset.tilgangaktiv) {
       const av = Boolean(t.dataset.av);
       t.disabled = true; t.innerHTML = prikker() + (av ? " Melder av" : " Melder på");
       try {
@@ -7166,10 +7638,13 @@ const UI = (() => {
     if (t.dataset.emoji) { closeSheet(); return reager(t.dataset.pa, t.dataset.emoji); }
     if (t.dataset.msgmeny) return sheetEmoji(t.dataset.msgmeny);
     if (t.dataset.rapporter) return sheetRapporter(t.dataset.rapporter);
+    if (t.dataset.reaksjoner) return sheetReaksjoner(t.dataset.reaksjoner);
+    if (t.dataset.tilgangvalg) return sheetTilgangvalg(t.dataset.tilgangvalg);
     if (t.dataset.tilgangaktiv) {
-      const paa = t.dataset.paa === "1";
-      if (!paa && !await bekreft("Stenge koden? Kunden kan ikke lage flere turer med den. Turer som finnes, virker som før.", { ja: "Steng" })) return;
-      try { await Api.settTilgangAktiv(t.dataset.tilgangaktiv, paa); await aapneTilgang(true); }
+      const paa = t.dataset.aapne === "1";
+      if (!paa && !await bekreft("Stenge koden? Kunden kan ikke lage flere turer med den. Turer som finnes, virker som før.", { ja: "Steng", fare: true })) return;
+      closeSheet();
+      try { await Api.settTilgangAktiv(t.dataset.tilgangaktiv, paa); await aapneTilgang(true); toast(paa ? "Koden virker igjen." : "Koden er stengt."); }
       catch (err) { toast(err.message || "Klarte ikke."); }
       return;
     }
@@ -7212,7 +7687,7 @@ const UI = (() => {
     if (t.dataset.sheet === "endrenavn") return sheetEndreNavn();
     if (t.dataset.sheet === "paaroerende") return sheetPaaroerende();
     if (t.dataset.sheet === "sletting") return sheetSletting();
-    if (t.dataset.sheet === "delkode") return sheetDelKode();
+    if (t.dataset.sheet === "delkode") return aapneTurkode();
     if (t.dataset.sheet === "newtrip") return sheetNewTrip();
     if (t.dataset.sheet === "newchannel") return sheetNewChannel();
     if (t.dataset.sheet === "addday") return sheetAddDay();
@@ -7322,10 +7797,11 @@ const UI = (() => {
     if (sc.scrollHeight - sc.scrollTop - sc.clientHeight < 140) { S.nye = 0; render(); }
   }, { passive: true });
 
-  $("sheetBg").addEventListener("click", e => { if (e.target.id === "sheetBg") closeSheet(); });
+  $("sheetBg").addEventListener("click", e => { if (e.target.id === "sheetBg") forsokLukkArk(); });
   document.addEventListener("keydown", e => {
     if (e.key !== "Escape") return;
-    if (!$("sheetBg").hidden) return closeSheet();
+    if (document.querySelector(".handlingsark-bg")) return;
+    if (!$("sheetBg").hidden) return forsokLukkArk();
     if (lukkBilde()) return;
     if (S.side) return lukkSide();
     closeChat();

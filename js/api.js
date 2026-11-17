@@ -160,6 +160,9 @@ const Api = (() => {
     const { data, error } = await sb.rpc("join_trip", { p_code: code, p_name: name });
     if (error) throw friendly(error);
     const t = Array.isArray(data) ? data[0] : data;
+    // Feil kode gir et tomt svar, ikke en feil, så basen kan telle forsøket
+    // (utvidelse-35). Før det kom feilen som 'ukjent_kode'.
+    if (!t || !t.id) throw friendly({ message: "ukjent_kode" });
     return { id: t.id, code: t.code, name: t.name, org: t.org, dates: "" };
   }
 
@@ -226,7 +229,13 @@ const Api = (() => {
     if (m.includes("for_mange_meldinger")) return k("Du skriver fort. Vent et lite øyeblikk.");
     if (m.includes("for_mange_chatter")) return k("Du har laget mange chatter på denne turen. Rydd i dem først.");
     if (m.includes("ikke_innlogget")) return k("Appen fikk ikke kontakt med serveren. Prøv igjen.");
-    return new Error(m || "Noe gikk galt.");
+    if (m.includes("for_mange_forsok")) return k("For mange feil koder på kort tid. Vent et kvarter og prøv igjen.");
+    // En feilkode vi ikke har tekst for (ord_med_understrek), eller en
+    // teknisk melding fra basen, skal aldri vises som den er.
+    if (!m || /^[a-z0-9_]+$/.test(m) || /invalid input|syntax|violates|column|relation|function|permission denied|JWT/i.test(m)) {
+      return k("Noe gikk galt. Prøv igjen.");
+    }
+    return new Error(m);
   }
 
   /* ───────── last hele turen ───────── */
@@ -433,12 +442,16 @@ const Api = (() => {
     if (error && error.code !== "23505") throw friendly(error);
     blokkerte.set(brukerId, navn || "");
     fire();
+    // Lista over chatter viser den nyeste meldingen i hver. Var den fra
+    // personen du nettopp blokkerte, skal den byttes ut med en gang.
+    if (cache.trip) loadRecent(cache.trip.id).then(() => fire()).catch(() => {});
   }
   async function opphevBlokk(brukerId) {
     const { error } = await sb.from("blokkert").delete().eq("blokkert", brukerId);
     if (error) throw friendly(error);
     blokkerte.delete(brukerId);
     fire();
+    if (cache.trip) loadRecent(cache.trip.id).then(() => fire()).catch(() => {});
   }
   async function rapporter({ tripId, messageId, gjelder, gjelderNavn, grunn, utdrag }) {
     const { error } = await sb.from("rapporter").insert({
@@ -526,11 +539,23 @@ const Api = (() => {
     }
     if (error) throw error;
     const map = {};
+    const somRad = m => ({ txt: m.txt, who: m.author_name, ts: m.created_at, mine: m.author_id === userId });
+    // Chatter der den nyeste meldingen er fra en du har blokkert. Der skal
+    // lista vise den nyeste meldingen fra noen andre, ikke den blokkerte.
+    const skjulte = new Set();
     for (const m of (data || [])) {
-      if (m.author_id && blokkerte.has(m.author_id)) continue;
-      if (!map[m.channel_id]) {
-        map[m.channel_id] = { txt: m.txt, who: m.author_name, ts: m.created_at, mine: m.author_id === userId };
-      }
+      if (m.author_id && blokkerte.has(m.author_id)) { if (!map[m.channel_id]) skjulte.add(m.channel_id); continue; }
+      if (!map[m.channel_id]) map[m.channel_id] = somRad(m);
+    }
+    const mangler = [...skjulte].filter(c => !map[c]);
+    if (mangler.length && blokkerte.size) {
+      const ute = "(" + [...blokkerte.keys()].join(",") + ")";
+      await Promise.all(mangler.map(async c => {
+        const { data: d } = await sb.from("messages").select("channel_id, txt, author_name, created_at, author_id")
+          .eq("channel_id", c).not("author_id", "in", ute)
+          .order("created_at", { ascending: false }).limit(1);
+        if (d && d[0]) map[c] = somRad(d[0]);
+      })).catch(() => {});
     }
     cache.recent = map;
     return map;
@@ -1228,8 +1253,10 @@ const Api = (() => {
     return { superadmin: sup, koder, kanLage: sup || koder.some(k => k.turerIgjen === null || k.turerIgjen > 0) };
   }
   async function losInnTilgang(kode) {
-    const { error } = await sb.rpc("los_inn_tilgang", { p_kode: kode });
+    const { data, error } = await sb.rpc("los_inn_tilgang", { p_kode: kode });
     if (error) throw friendly(error);
+    // Feil kode er et svar, ikke en feil (utvidelse-35).
+    if (data === "ukjent_tilgang") throw friendly({ message: "ukjent_tilgang" });
   }
   async function lagTilgang({ kunde, maksTurer, maksDeltakere, gyldigTil }) {
     const { data, error } = await sb.rpc("lag_tilgang", {
@@ -1296,10 +1323,17 @@ const Api = (() => {
   /* Hvor mange venter på å bli sluppet inn? Et tall, ikke en liste —
      det er alt Meg-fanen trenger for å sette en prikk. */
   async function antallVentende(tripId) {
+    return (await ventendeListe(tripId)).length;
+  }
+  // Navnene på dem som venter på å bli sluppet inn, eldste først.
+  async function ventendeListe(tripId) {
     const { data, error } = await sb.from("members")
-      .select("user_id").eq("trip_id", tripId).eq("status", "pending");
-    if (error) return 0;
-    return (data || []).length;
+      .select("user_id, name").eq("trip_id", tripId).eq("status", "pending").order("joined_at");
+    if (error) {
+      const r = await sb.from("members").select("user_id, name").eq("trip_id", tripId).eq("status", "pending");
+      return r.error ? [] : (r.data || []).map(x => ({ id: x.user_id, navn: x.name }));
+    }
+    return (data || []).map(x => ({ id: x.user_id, navn: x.name }));
   }
 
   /* Hvilken kartapp du vil bruke. Et valg som hører til enheten, ikke
@@ -2678,7 +2712,7 @@ const Api = (() => {
 
   return {
     samtidigNokkel, samtidigGrupper,
-    settFunksjoner, minTilgang, losInnTilgang, lagTilgang, tilgangListe, settTilgangAktiv, antallEgneTurer,
+    settFunksjoner, ventendeListe, minTilgang, losInnTilgang, lagTilgang, tilgangListe, settTilgangAktiv, antallEgneTurer,
     lastBlokkerte, blokkertListe, blokker, opphevBlokk, rapporter, rapportListe, behandleRapport, slettMeldingMedId,
     fyllSeter, dokumenter, lastOppDokument, dokumentAdresse, slettDokument, sokMeldinger,
     endreNavn, rettNavn, setSeterFritt, settPaaroerende, minPaaroerende, lagrePaaroerende, slettPaaroerende,

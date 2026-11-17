@@ -19,7 +19,7 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap">
 <noscript><link rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap"></noscript>
-<link rel="stylesheet" href="styles.css?v=116">
+<link rel="stylesheet" href="styles.css?v=117">
 </head>
 <body>
 
@@ -75,14 +75,29 @@
   // stående ferdig bak den. Derfor: gå tegningen ut, og bli så liggende
   // til appen sier den har noe å vise. Taket er der fordi en feil også
   // skal fram — står det stille i fire sekunder, er det noe galt.
-  const start = Date.now();
-  if (skjelett) { setTimeout(avslutt, LENGDE + 120); return; }
-  let klar = false;
+  //
+  // Tegningen starter på første bilde som faktisk vises, ikke når siden
+  // er lest inn. I iOS-appen holder WebKit igjen første tegning et par
+  // sekunder mens appen starter, og da var logoen ferdig tegnet (og
+  // skjelettet borte) før noe kom på skjermen. En skjult fane tegner
+  // ingen bilder; der starter den med en gang. Reserven på seks sekunder
+  // er bare for at åpningen aldri skal bli liggende.
+  let start = 0, klar = false;
   addEventListener("tripmate:klar", () => {
     klar = true;
-    setTimeout(avslutt, Math.max(0, LENGDE - (Date.now() - start)));
+    if (start && !skjelett) setTimeout(avslutt, Math.max(0, LENGDE - (Date.now() - start)));
   }, { once: true });
-  setTimeout(() => { if (!klar) avslutt(); }, TAK);
+  const spill = () => {
+    if (start) return;
+    start = Date.now();
+    a.classList.add("spill");
+    if (skjelett) { setTimeout(avslutt, LENGDE + 120); return; }
+    if (klar) setTimeout(avslutt, LENGDE);
+    setTimeout(() => { if (!klar) avslutt(); }, TAK);
+  };
+  if (document.hidden) spill();
+  else requestAnimationFrame(() => requestAnimationFrame(spill));
+  setTimeout(spill, 6000);
 })();
 </script>
 
@@ -197,14 +212,14 @@
 
 <div class="toast" id="toast" hidden></div>
 
-<script src="js/config.js?v=116"></script>
-<script src="vendor/supabase.js?v=116"></script>
-<script src="vendor/qrcode.js?v=116"></script>
-<script src="js/templates.js?v=116"></script>
-<script src="js/api.js?v=116"></script>
-<script src="js/parse.js?v=116"></script>
-<script src="js/ui.js?v=116"></script>
-<script src="js/native.js?v=116"></script>
+<script src="js/config.js?v=117"></script>
+<script src="vendor/supabase.js?v=117"></script>
+<script src="vendor/qrcode.js?v=117"></script>
+<script src="js/templates.js?v=117"></script>
+<script src="js/api.js?v=117"></script>
+<script src="js/parse.js?v=117"></script>
+<script src="js/ui.js?v=117"></script>
+<script src="js/native.js?v=117"></script>
 <script>
 
 // Safari regner 100dvh litt feil, og da blir appen kortere enn skjermen —

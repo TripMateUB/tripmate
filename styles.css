@@ -35,6 +35,7 @@
   --regn:#1F5A8A; --regn-soft:#E3EEF7; --storm-soft:#FBE9E7;
   --r:14px;
   --safe-b:env(safe-area-inset-bottom,0px);
+  --safe-t:env(safe-area-inset-top,0px);
 
   /* Bevegelse. Kurvene er hentet, ikke funnet på. */
   --ease-ut:cubic-bezier(0.23, 1, 0.32, 1);
@@ -83,7 +84,21 @@ button,input,select,textarea{font:inherit;color:inherit}
 /* En tekstlenke er rundt 19 px høy, og det er for lite å treffe på.
    Trykkflaten strekkes med polstring og trekkes inn igjen med like
    stor negativ marg, så ingenting flytter seg. */
-.linkbtn{background:none;border:0;padding:15px 8px;margin:0 -8px;min-width:44px;color:var(--blue);font-weight:600;cursor:pointer;text-decoration:underline;font-size:inherit}
+.linkbtn{background:none;border:0;padding:15px 8px;margin:0 -8px;min-width:44px;color:var(--blue);font-weight:600;cursor:pointer;text-decoration:none;font-size:inherit}
+.linkbtn:active{opacity:.45}
+
+/* Små knapper inne i en rad (Slipp inn, Avvis), som i iOS-lister:
+   en kapsel med tekst, ikke en understreket lenke. */
+.pilleknapp{flex:none;border:0;border-radius:99px;padding:7px 13px;min-height:32px;cursor:pointer;
+  font-family:"DM Sans",sans-serif;font-weight:600;font-size:13.5px;background:var(--surface-2);color:var(--ink)}
+.pilleknapp.fylt{background:var(--blue);color:var(--on-blue)}
+.pilleknapp:active{opacity:.6}
+/* Rund ikonknapp til høyre i en rad (ring, ⋯). Trykkflaten er 44 px. */
+.rundknapp{flex:none;width:34px;height:34px;border-radius:50%;border:0;background:var(--surface-2);color:var(--blue);
+  display:grid;place-items:center;cursor:pointer;position:relative}
+.rundknapp::before{content:"";position:absolute;inset:-5px}
+.rundknapp svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.rundknapp:active{opacity:.6}
 
 /* ---------- join ---------- */
 .join{height:100%;overflow-y:auto;overscroll-behavior:contain;display:grid;place-items:center;padding:28px 20px calc(28px + var(--safe-b));background:var(--ground)}
@@ -447,6 +462,9 @@ input[type="date"]::-webkit-date-and-time-value{text-align:left;margin:0}
 @keyframes up{from{transform:translateY(14px)}to{transform:none}}
 .sheet .grab{width:38px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 16px}
 .sheet h3{font-size:19px}
+/* Står overskriften rett over et skjema eller en liste (uten tekst
+   imellom), trenger den luft under seg. */
+.sheet h3 + form,.sheet h3 + .gruppe,.sheet h3 + .segment,.sheet h3 + .field{margin-top:16px}
 .sheet .addr{font-size:14px;color:var(--ink-2);margin-top:3px}
 .sheet .acts{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:15px}
 .sheet .close{margin-top:10px;width:100%}
@@ -775,6 +793,19 @@ label.person span{flex:1;min-width:0}
   width:46px;height:46px;border-radius:50%;flex:none;display:grid;place-items:center;
   background:var(--blue);color:#fff;font-family:"DM Sans",sans-serif;font-weight:700;font-size:16px;
 }
+.megava.liten{width:36px;height:36px;font-size:13px;background:var(--surface-2);color:var(--ink-2)}
+/* Deltakerrader: ikke trykkbare i seg selv, så ingen trykkfarge. */
+.gruppe .listrow.deltrad{cursor:default;min-height:58px;gap:10px}
+.gruppe .listrow.deltrad + .listrow::before{left:60px}
+
+/* Turkoden på sin egen side: stor kode, QR-koden under. */
+.gruppe .listrow.av .nm,.gruppe .listrow.av .sub{opacity:.5}
+.kodeside{text-align:center;padding:4px 0 2px}
+.storkode{display:inline-block;border:0;background:none;cursor:pointer;color:var(--ink);
+  font-size:44px;font-weight:700;letter-spacing:.12em;padding:4px 12px;border-radius:14px}
+.storkode:active{background:var(--surface-2)}
+.kodehint{font-size:13.5px;margin:2px 0 18px}
+.kodeside .qrkode{margin-bottom:6px;max-width:230px;border:1px solid var(--line-soft)}
 .megkort .grow{flex:1;min-width:0}
 .megkort b{display:block;font-family:"DM Sans",sans-serif;font-size:16.5px}
 .megkort small{display:block;font-size:13px;color:var(--ink-2);margin-top:1px}
@@ -910,8 +941,10 @@ label.person span{flex:1;min-width:0}
 .oppgave .listrow{border-bottom:0;padding-bottom:4px}
 /* Streken under skal ligge der den lå; polstringen over og under er
    bare trykkflate, og trekkes inn igjen med marg. */
-.skjulknapp{font-size:12.5px;padding:13px 0 12px;margin:0;color:var(--ink-3);
-  text-decoration:none;border-bottom:1px dashed var(--line)}
+.skjulknapp{position:relative;display:inline-flex;align-items:center;min-height:28px;min-width:0;
+  font-size:12.5px;padding:4px 11px;margin:2px 0 12px;border-radius:99px;
+  background:var(--surface-2);color:var(--ink-2)}
+.skjulknapp::before{content:"";position:absolute;inset:-8px -4px}
 
 /* «eller»-skille på innloggingsskjermen */
 .skille{display:flex;align-items:center;gap:12px;margin:22px 0;color:var(--ink-3);
@@ -1073,22 +1106,18 @@ label.person span{flex:1;min-width:0}
 .aapning.ut{opacity:0;pointer-events:none}
 .aapning .ord{display:flex;align-items:center;gap:0;color:var(--ink)}
 .aapning .merkeT{width:54px;height:54px;flex:none}
-.aapning .T-stem,.aapning .T-arm{
-  stroke-dasharray:100;stroke-dashoffset:100;
-  animation:strek-tegn 420ms var(--ease-ut) forwards;
-}
-.aapning .T-arm{animation-delay:150ms}
-.aapning .T-dot{
-  transform:scale(0);transform-origin:17.83px 4.83px;
-  animation:prikk-land 260ms var(--ease-ut) 430ms forwards;
-}
+.aapning .T-stem,.aapning .T-arm{stroke-dasharray:100;stroke-dashoffset:100}
+.aapning.spill .T-stem,.aapning.spill .T-arm{animation:strek-tegn 420ms var(--ease-ut) forwards}
+.aapning.spill .T-arm{animation-delay:150ms}
+.aapning .T-dot{transform:scale(0);transform-origin:17.83px 4.83px}
+.aapning.spill .T-dot{animation:prikk-land 260ms var(--ease-ut) 430ms forwards}
 .aapning .resten{
   font-family:"DM Sans",system-ui,sans-serif;
   font-size:40px;font-weight:700;letter-spacing:-.03em;line-height:1;margin-left:-13px;
   /* Ordet skyves ut fra bak T-en: masken åpner seg, teksten følger. */
   clip-path:inset(0 100% 0 0);transform:translateX(-10px);opacity:0;
-  animation:ord-ut 460ms var(--ease-ut) 520ms forwards;
 }
+.aapning.spill .resten{animation:ord-ut 460ms var(--ease-ut) 520ms forwards}
 @keyframes strek-tegn{to{stroke-dashoffset:0}}
 /* «Mate» er oransje i logoen. */
 .aapning .mate{color:var(--merke)}
@@ -1316,8 +1345,17 @@ a.listrow:active{transform:none}
 .omvis-kort p{font-size:14.5px;color:var(--ink-2);margin:7px 0 0;line-height:1.45}
 .omvis-knapper{display:flex;gap:8px;margin-top:14px}
 .omvis-knapper .btn{flex:1}
-/* «Hopp over resten» skal kunne velges, men ikke konkurrere med Neste. */
+/* «Avslutt» skal kunne velges, men ikke konkurrere med Neste. */
 .omvis-hopp{display:block;margin:8px auto 0;font-size:13px;color:var(--ink-3)}
+/* Et «trykk»-steg: laget slipper trykket gjennom til det ringen peker på
+   (resten stoppes i ui.js), og ringen pulserer så det er tydelig at det
+   er der du skal trykke. Kortet har da ingen Neste-knapp. */
+.omvis.slipp{pointer-events:none}
+.omvis.slipp .omvis-kort{pointer-events:auto}
+.omvis.slipp .omvis-ring::after{content:"";position:absolute;inset:-2px;border-radius:inherit;
+  border:2px solid var(--merke);animation:omvis-puls 1.6s var(--ease-skuff, ease-out) infinite}
+@keyframes omvis-puls{0%{opacity:.9;transform:scale(1)}70%,100%{opacity:0;transform:scale(1.12)}}
+@media (prefers-reduced-motion: reduce){.omvis.slipp .omvis-ring::after{animation:none;opacity:0}}
 
 /* Nedtelling før programvarsel. Ligger over fanelinja, og har sin egen
    knapp: «Ikke varsle» må kunne treffes mens stripa står. */
@@ -1453,3 +1491,94 @@ html.skjelett .skjelettapp{display:flex;flex-direction:column;height:var(--app-h
 .sk-faner{display:flex;justify-content:space-around;gap:10px;margin:0 10px calc(9px + var(--safe-b));padding:12px 16px;
   border:1px solid var(--line-soft);border-radius:26px}
 .sk-fane{width:44px;height:30px;border-radius:10px}
+
+/* Noen venter på å bli sluppet inn: øverst i Program og Turen. */
+.venterkort{border-color:color-mix(in srgb, var(--amber) 45%, var(--line))}
+.venterkort .listrow{padding:10px 13px;border-bottom:0;gap:11px}
+
+/* Helside som glir opp over appen (chatreglene). Ligger inne i .app, så
+   den holder seg innenfor telefonen også på en bred skjerm. */
+.helside{position:absolute;inset:0;z-index:70;background:var(--ground);display:flex;flex-direction:column;
+  transform:translateY(100%);transition:transform .38s cubic-bezier(.32,.72,0,1)}
+.helside.inne{transform:none}
+.helside.ut{transform:translateY(100%);transition-duration:.3s}
+.helside-topp{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:8px;
+  padding:calc(var(--safe-t, 0px) + 10px) 12px 10px;border-bottom:1px solid var(--line-soft);background:var(--surface)}
+.helside-topp b{font-family:"DM Sans",sans-serif;font-size:16px}
+.helside-avbryt{justify-self:start;background:none;border:0;color:var(--blue);font-size:16px;padding:10px 6px;cursor:pointer}
+.helside-avbryt:active{opacity:.45}
+.helside-innhold{flex:1;overflow-y:auto;overscroll-behavior:contain;padding:22px 20px}
+.helside-h{font-size:24px;line-height:1.15;margin:0 0 8px}
+.helside-innhold .lede{color:var(--ink-2);font-size:15.5px;margin:0 0 20px}
+.regelliste{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:16px}
+.regelliste li{display:flex;gap:13px;align-items:flex-start;font-size:15.5px;line-height:1.45;color:var(--ink)}
+.regelliste .rikon{margin-top:1px}
+.helside-bunn{padding:12px 20px calc(var(--safe-b) + 12px);border-top:1px solid var(--line-soft);background:var(--surface)}
+@media (prefers-reduced-motion:reduce){.helside{transition:none}}
+
+/* Handlingsark som i iOS: to grupper nederst, den farlige handlingen i
+   rødt, «Fortsett» for seg selv og i fet skrift. Ligger over arket. */
+.handlingsark-bg{position:fixed;inset:0;z-index:200;background:rgba(9,15,22,0);transition:background .24s ease-out;
+  display:flex;align-items:flex-end;justify-content:center}
+.handlingsark-bg.inne{background:rgba(9,15,22,.38)}
+.handlingsark{width:100%;max-width:480px;padding:0 10px calc(var(--safe-b) + 10px);display:flex;flex-direction:column;gap:8px;
+  transform:translateY(110%);transition:transform .32s cubic-bezier(.32,.72,0,1)}
+.handlingsark-bg.inne .handlingsark{transform:none}
+.handlingsgruppe{background:var(--surface);border-radius:14px;overflow:hidden}
+.handlingstekst{margin:0;padding:13px 16px;text-align:center;font-size:13px;color:var(--ink-3);border-bottom:1px solid var(--line-soft)}
+.handling{display:block;width:100%;border:0;background:none;padding:16px;min-height:56px;font-size:18px;color:var(--blue);cursor:pointer}
+.handling + .handling{border-top:1px solid var(--line-soft)}
+.handling.fare{color:var(--danger)}
+.handling.fet{font-weight:600}
+.handling:active{background:var(--surface-2)}
+@media (prefers-reduced-motion:reduce){.handlingsark{transition:none}}
+
+/* Meldingsmenyen, som i Meldinger: samtalen blurres, meldingen løftes
+   fram der den sto, emojiene i en kapsel over og valgene under. */
+.kontekst-bg{position:fixed;inset:0;z-index:150;background:rgba(9,15,22,0);
+  -webkit-backdrop-filter:blur(0);backdrop-filter:blur(0);
+  transition:background .22s ease-out,backdrop-filter .22s ease-out,-webkit-backdrop-filter .22s ease-out}
+.kontekst-bg.inne{background:rgba(9,15,22,.22);-webkit-backdrop-filter:blur(14px) saturate(1.2);backdrop-filter:blur(14px) saturate(1.2)}
+.kontekst{position:absolute;left:10px;right:auto;display:flex;flex-direction:column;align-items:flex-start;gap:8px;
+  max-width:calc(100% - 20px)}
+.kontekst.meg{left:auto;right:10px;align-items:flex-end}
+.kmemoji,.kmliste{transform:scale(.6);opacity:0;transition:transform .32s cubic-bezier(.32,1.28,.6,1),opacity .18s ease-out}
+.kontekst .kmemoji{transform-origin:left bottom}
+.kontekst.meg .kmemoji{transform-origin:right bottom}
+.kontekst .kmliste{transform-origin:left top}
+.kontekst.meg .kmliste{transform-origin:right top}
+.kontekst-bg.inne .kmemoji,.kontekst-bg.inne .kmliste{transform:none;opacity:1}
+.kontekst-bg.ut .kmemoji,.kontekst-bg.ut .kmliste{opacity:0;transform:scale(.9);transition-duration:.16s}
+.kmemoji{display:flex;gap:2px;padding:5px;border-radius:99px;background:var(--surface);
+  box-shadow:0 8px 30px -8px rgba(16,53,65,.35)}
+.kmemoji button{width:42px;height:42px;border:0;border-radius:50%;background:none;font-size:25px;line-height:1;cursor:pointer;
+  display:grid;place-items:center;transition:transform .12s ease-out}
+.kmemoji button:active{transform:scale(1.25)}
+.kmemoji button.valgt{background:var(--blue-soft)}
+.kmmelding{max-width:100%}
+.kmmelding .bubble{box-shadow:0 10px 30px -10px rgba(16,53,65,.4);max-width:min(320px,82vw)}
+.kontekst:not(.meg) .kmmelding .bubble{background:var(--surface);border-radius:15px 15px 15px 5px;padding:9px 12px;font-size:15px}
+.kontekst.meg .kmmelding .bubble{background:var(--blue);color:var(--on-blue);border-radius:15px 15px 5px 15px;padding:9px 12px;font-size:15px}
+.kmmelding .bildeboks{display:block;border:0;padding:0;border-radius:15px;overflow:hidden;max-width:min(260px,70vw)}
+.kmmelding .bildeboks img{display:block;width:100%;height:auto}
+.kmliste{min-width:230px;border-radius:14px;overflow:hidden;background:color-mix(in srgb, var(--surface) 92%, transparent);
+  box-shadow:0 12px 40px -10px rgba(16,53,65,.4)}
+.kmvalg{display:flex;align-items:center;justify-content:space-between;gap:20px;width:100%;border:0;background:none;
+  padding:12px 16px;min-height:46px;font-size:16px;color:var(--ink);cursor:pointer;text-align:left}
+.kmvalg + .kmvalg{border-top:1px solid var(--line-soft)}
+.kmvalg svg{width:19px;height:19px;flex:none;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.kmvalg.fare{color:var(--danger)}
+.kmvalg:active{background:var(--surface-2)}
+/* I appen holder man på meldingen, som i Meldinger. ⋯-knappen er for mus. */
+html.nativ .msgmeny{display:none}
+@media (prefers-reduced-motion:reduce){.kmemoji,.kmliste{transition:none}}
+
+/* Segmentkontroll av radioknapper (typen kjøretøy). */
+.segment.valg label{flex:1;position:relative;text-align:center;border-radius:8px;padding:8px 4px;cursor:pointer;
+  font-family:"DM Sans",sans-serif;font-weight:600;font-size:13px;color:var(--ink-2)}
+.segment.valg input{position:absolute;opacity:0;pointer-events:none}
+.segment.valg label:has(input:checked){background:var(--surface);color:var(--ink);box-shadow:0 1px 3px rgba(16,53,65,.14)}
+.segment.valg label:has(input:focus-visible){outline:2px solid var(--blue);outline-offset:1px}
+/* To korte felt side om side. */
+.feltpar{display:flex;gap:10px}
+.feltpar .field{flex:1;min-width:0}
