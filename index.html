@@ -19,7 +19,7 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap">
 <noscript><link rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap"></noscript>
-<link rel="stylesheet" href="styles.css?v=117">
+<link rel="stylesheet" href="styles.css?v=118">
 </head>
 <body>
 
@@ -142,15 +142,15 @@
     <form id="joinForm" novalidate>
       <div class="field">
         <label for="fFirst">Fornavn</label>
-        <input id="fFirst" autocapitalize="words" autocorrect="off" spellcheck="false" name="first" autocomplete="given-name" required>
+        <input id="fFirst" maxlength="40" autocapitalize="words" autocorrect="off" spellcheck="false" name="first" autocomplete="given-name" required>
       </div>
       <div class="field">
         <label for="fLast">Etternavn</label>
-        <input id="fLast" autocapitalize="words" autocorrect="off" spellcheck="false" name="last" autocomplete="family-name" required>
+        <input id="fLast" maxlength="40" autocapitalize="words" autocorrect="off" spellcheck="false" name="last" autocomplete="family-name" required>
       </div>
       <div class="field">
         <label for="fCode">Turkode</label>
-        <input id="fCode" name="code" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="SEKS TEGN" required>
+        <input id="fCode" maxlength="12" name="code" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="SEKS TEGN" required>
       </div>
       <p class="err" id="joinErr" role="alert" hidden></p>
       <button class="btn primary big" type="submit" id="joinSubmit">Bli med på turen</button>
@@ -212,14 +212,14 @@
 
 <div class="toast" id="toast" hidden></div>
 
-<script src="js/config.js?v=117"></script>
-<script src="vendor/supabase.js?v=117"></script>
-<script src="vendor/qrcode.js?v=117"></script>
-<script src="js/templates.js?v=117"></script>
-<script src="js/api.js?v=117"></script>
-<script src="js/parse.js?v=117"></script>
-<script src="js/ui.js?v=117"></script>
-<script src="js/native.js?v=117"></script>
+<script src="js/config.js?v=118"></script>
+<script src="vendor/supabase.js?v=118"></script>
+<script src="vendor/qrcode.js?v=118"></script>
+<script src="js/templates.js?v=118"></script>
+<script src="js/api.js?v=118"></script>
+<script src="js/parse.js?v=118"></script>
+<script src="js/ui.js?v=118"></script>
+<script src="js/native.js?v=118"></script>
 <script>
 
 // Safari regner 100dvh litt feil, og da blir appen kortere enn skjermen —

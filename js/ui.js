@@ -3172,7 +3172,7 @@ const UI = (() => {
       ${leder ? `<form id="adrForm" style="margin-top:16px">
         <div class="field">
           <label for="adrInn">${p.addr ? "Endre adresse" : "Legg inn adresse"}</label>
-          <input id="adrInn" value="${esc(p.addr)}" placeholder="Gate, postnummer, sted">
+          <input id="adrInn" maxlength="300" value="${esc(p.addr)}" placeholder="Gate, postnummer, sted">
         </div>
         <button class="btn primary" style="width:100%" type="submit">Lagre adressen</button>
       </form>` : ""}
@@ -3251,7 +3251,7 @@ const UI = (() => {
             <input id="eTid" type="time" value="${esc(it.t)}">
             <small style="color:var(--ink-3);display:block;margin-top:5px">La stå tomt hvis tiden ikke er bestemt.</small></div>
           <div class="field"><label for="eSlutt">Slutter</label><input id="eSlutt" type="time" value="${esc(slutt(it) || "")}"></div>
-          <div class="field"><label for="eTittel">Hva skjer</label><input id="eTittel" value="${esc(it.title)}"></div>
+          <div class="field"><label for="eTittel">Hva skjer</label><input id="eTittel" maxlength="120" value="${esc(it.title)}"></div>
           <div class="field"><label for="eSted">Sted</label>
             <select id="eSted" class="select">
               <option value="">Ingen / ikke stedfestet</option>
@@ -3259,10 +3259,10 @@ const UI = (() => {
               <option value="__new">+ Nytt sted…</option>
             </select></div>
           <div id="eNyttSted" hidden>
-            <div class="field"><label for="eNavn">Navn på stedet</label><input id="eNavn"></div>
-            <div class="field"><label for="eAdr">Adresse</label><input id="eAdr" placeholder="Gate, postnummer, sted"></div>
+            <div class="field"><label for="eNavn">Navn på stedet</label><input id="eNavn" maxlength="120"></div>
+            <div class="field"><label for="eAdr">Adresse</label><input id="eAdr" maxlength="300" placeholder="Gate, postnummer, sted"></div>
           </div>
-          <div class="field"><label for="eNotat">Notat</label><input id="eNotat" value="${esc(it.note)}"></div>
+          <div class="field"><label for="eNotat">Notat</label><input id="eNotat" maxlength="2000" value="${esc(it.note)}"></div>
 
           <label class="pick" style="margin-bottom:10px">
             <input type="checkbox" id="ePaa" ${it.paamelding ? "checked" : ""}>
@@ -3391,7 +3391,7 @@ const UI = (() => {
       <p class="muted" style="margin:6px 0 14px">Skriv turkoden du fikk av reiselederen.</p>
       <form id="joinTripForm">
         <div class="field"><label for="jCode">Turkode</label>
-          <input id="jCode" autocapitalize="characters" spellcheck="false" class="mono" style="text-transform:uppercase" value="${esc(kode || "")}"></div>
+          <input id="jCode" maxlength="12" autocapitalize="characters" spellcheck="false" class="mono" style="text-transform:uppercase" value="${esc(kode || "")}"></div>
         <p class="err" id="jErr" hidden></p>
         <button class="btn primary big" type="submit">Bli med</button>
       </form>
@@ -3470,10 +3470,10 @@ const UI = (() => {
     openSheet(`<h3 style="margin-bottom:14px">Lag en ny tur</h3>
       ${grense}
       <form id="newTripForm" novalidate>
-        ${p ? "" : `<div class="field"><label for="tFirst">Ditt fornavn</label><input id="tFirst" autocapitalize="words" autocorrect="off" spellcheck="false" autocomplete="given-name"></div>
-                    <div class="field"><label for="tLast">Ditt etternavn</label><input id="tLast" autocapitalize="words" autocorrect="off" spellcheck="false" autocomplete="family-name"></div>`}
-        <div class="field"><label for="tName">Navn på turen</label><input id="tName" placeholder="Barcelona 2027"></div>
-        <div class="field"><label for="tOrg">Gruppe</label><input id="tOrg" placeholder="Sandnes IL G16, salgsavdelingen eller 10B"></div>
+        ${p ? "" : `<div class="field"><label for="tFirst">Ditt fornavn</label><input id="tFirst" maxlength="40" autocapitalize="words" autocorrect="off" spellcheck="false" autocomplete="given-name"></div>
+                    <div class="field"><label for="tLast">Ditt etternavn</label><input id="tLast" maxlength="40" autocapitalize="words" autocorrect="off" spellcheck="false" autocomplete="family-name"></div>`}
+        <div class="field"><label for="tName">Navn på turen</label><input id="tName" maxlength="80" placeholder="Barcelona 2027"></div>
+        <div class="field"><label for="tOrg">Gruppe</label><input id="tOrg" maxlength="120" placeholder="Sandnes IL G16, salgsavdelingen eller 10B"></div>
         ${sporsmaal("tProgram", "Hvordan vil du lage programmet?", "", [
           ["pdf", "Les inn fra PDF", "Appen leser PDF-en og viser et forslag."],
           ["selv", "Jeg legger det inn selv", ""]])}
@@ -3637,8 +3637,8 @@ const UI = (() => {
     openSheet(`<h3>Endre navnet ditt</h3>
       <p class="lede">Navnet vises for alle på turene dine. Det endres på alle turene samtidig.</p>
       <form id="enForm" novalidate>
-        <div class="field"><label for="enFirst">Fornavn</label><input id="enFirst" autocapitalize="words" autocorrect="off" spellcheck="false" value="${esc(p.first || "")}" autocomplete="given-name"></div>
-        <div class="field"><label for="enLast">Etternavn</label><input id="enLast" autocapitalize="words" autocorrect="off" spellcheck="false" value="${esc(p.last || "")}" autocomplete="family-name"></div>
+        <div class="field"><label for="enFirst">Fornavn</label><input id="enFirst" maxlength="40" autocapitalize="words" autocorrect="off" spellcheck="false" value="${esc(p.first || "")}" autocomplete="given-name"></div>
+        <div class="field"><label for="enLast">Etternavn</label><input id="enLast" maxlength="40" autocapitalize="words" autocorrect="off" spellcheck="false" value="${esc(p.last || "")}" autocomplete="family-name"></div>
         <p class="err" id="enErr" hidden></p>
         <button class="btn primary big" type="submit" id="enLagre">Lagre</button>
       </form>
@@ -3668,8 +3668,8 @@ const UI = (() => {
     openSheet(`<h3>Rett navnet</h3>
       <p class="lede">Gjelder bare denne turen.</p>
       <form id="rnForm" novalidate>
-        <div class="field"><label for="rnFirst">Fornavn</label><input id="rnFirst" autocapitalize="words" autocorrect="off" spellcheck="false" value="${esc(deler.slice(0, -1).join(" ") || deler[0] || "")}"></div>
-        <div class="field"><label for="rnLast">Etternavn</label><input id="rnLast" autocapitalize="words" autocorrect="off" spellcheck="false" value="${esc(deler.length > 1 ? deler[deler.length - 1] : "")}"></div>
+        <div class="field"><label for="rnFirst">Fornavn</label><input id="rnFirst" maxlength="40" autocapitalize="words" autocorrect="off" spellcheck="false" value="${esc(deler.slice(0, -1).join(" ") || deler[0] || "")}"></div>
+        <div class="field"><label for="rnLast">Etternavn</label><input id="rnLast" maxlength="40" autocapitalize="words" autocorrect="off" spellcheck="false" value="${esc(deler.length > 1 ? deler[deler.length - 1] : "")}"></div>
         <p class="err" id="rnErr" hidden></p>
         <button class="btn primary big" type="submit" id="rnLagre">Lagre</button>
       </form>
@@ -3692,8 +3692,8 @@ const UI = (() => {
     openSheet(`<h3>Ny chat i ${esc(S.trip.name)}</h3>
       <p class="muted" style="margin:6px 0 14px">For eksempel en gruppe som skal et annet sted enn resten.</p>
       <form id="newChForm">
-        <div class="field"><label for="cName">Navn på chatten</label><input id="cName" placeholder="Gruppe Eiffeltårnet"></div>
-        <div class="field"><label for="cSub">Kort beskrivelse</label><input id="cSub" placeholder="Onsdag"></div>
+        <div class="field"><label for="cName">Navn på chatten</label><input id="cName" maxlength="60" placeholder="Gruppe Eiffeltårnet"></div>
+        <div class="field"><label for="cSub">Kort beskrivelse</label><input id="cSub" maxlength="120" placeholder="Onsdag"></div>
         <div class="field">
           <label>Hvem skal se den</label>
           <div class="picks">
@@ -3815,7 +3815,7 @@ const UI = (() => {
         <div class="field"><label for="iSlutt">Slutter</label><input id="iSlutt" type="time">
           <small style="display:block;margin-top:5px;font-size:12.5px;color:var(--ink-3)">
             Valgfritt. Overlapper to punkter i tid, merker appen dem som samtidige.</small></div>
-        <div class="field"><label for="iTitle">Hva skjer</label><input id="iTitle" placeholder="Omvisning Berlinmuren" value="${esc(f.title || "")}"></div>
+        <div class="field"><label for="iTitle">Hva skjer</label><input id="iTitle" maxlength="120" placeholder="Omvisning Berlinmuren" value="${esc(f.title || "")}"></div>
         <div class="field">
           <label for="iPlace">Sted</label>
           <select id="iPlace" class="select">
@@ -3825,8 +3825,8 @@ const UI = (() => {
           </select>
         </div>
         <div id="newPlaceFields" hidden>
-          <div class="field"><label for="pName">Navn på stedet</label><input id="pName" autocapitalize="words" autocorrect="off" spellcheck="false" placeholder="Gedenkstätte Berliner Mauer"></div>
-          <div class="field"><label for="pAddr">Adresse</label><input id="pAddr" placeholder="Bernauer Straße 111, 13355 Berlin"></div>
+          <div class="field"><label for="pName">Navn på stedet</label><input id="pName" maxlength="120" autocapitalize="words" autocorrect="off" spellcheck="false" placeholder="Gedenkstätte Berliner Mauer"></div>
+          <div class="field"><label for="pAddr">Adresse</label><input id="pAddr" maxlength="300" placeholder="Bernauer Straße 111, 13355 Berlin"></div>
           <div class="field"><label for="pKind">Type</label>
             <select id="pKind" class="select">
               <option>Sted</option><option>Hotell</option><option>Museum</option>
@@ -3834,7 +3834,7 @@ const UI = (() => {
             </select></div>
           <p class="muted" style="margin:-4px 0 14px">Adressen er det kartet navigerer til — skriv den så nøyaktig du kan.</p>
         </div>
-        <div class="field"><label for="iNote">Notat (valgfritt)</label><input id="iNote" placeholder="Møtes igjen 13:45"></div>
+        <div class="field"><label for="iNote">Notat (valgfritt)</label><input id="iNote" maxlength="2000" placeholder="Møtes igjen 13:45"></div>
         <p class="err" id="iErr" hidden></p>
         <button class="btn primary big" type="submit" id="iSubmit">Legg til punktet</button>
       </form>
@@ -3905,8 +3905,8 @@ const UI = (() => {
           </select>
         </div>
         <div id="hNewFields" hidden>
-          <div class="field"><label for="hName">Navn</label><input id="hName" autocapitalize="words" autocorrect="off" spellcheck="false" placeholder="Hotel Moabit Plaza"></div>
-          <div class="field"><label for="hAddr">Adresse</label><input id="hAddr" placeholder="Stromstraße 62, 10551 Berlin"></div>
+          <div class="field"><label for="hName">Navn</label><input id="hName" maxlength="120" autocapitalize="words" autocorrect="off" spellcheck="false" placeholder="Hotel Moabit Plaza"></div>
+          <div class="field"><label for="hAddr">Adresse</label><input id="hAddr" maxlength="300" placeholder="Stromstraße 62, 10551 Berlin"></div>
         </div>
         <p class="err" id="hErr" hidden></p>
         <button class="btn primary big" type="submit">Lagre</button>
@@ -5430,7 +5430,7 @@ const UI = (() => {
         ${trip.channels.length} ${trip.channels.length === 1 ? "chat" : "chatter"} med alle meldingene,
         rom, seter og pakkeliste forsvinner for alle. Det kan ikke angres.</p>
       <div class="field"><label for="stNavn">Skriv navnet på turen for å bekrefte</label>
-        <input id="stNavn" autocomplete="off" placeholder="${esc(trip.name)}"></div>
+        <input id="stNavn" maxlength="80" autocomplete="off" placeholder="${esc(trip.name)}"></div>
       <p class="err" id="stErr" hidden></p>
       <button class="btn danger big" id="stJa" disabled>Slett turen for alle</button>
       <button class="btn close" data-close>Avbryt</button>`);

@@ -157,7 +157,11 @@ const Api = (() => {
   }
 
   async function joinByCode(code, name) {
-    const { data, error } = await sb.rpc("join_trip", { p_code: code, p_name: name });
+    // «sd5-u84», «SD5 U84» og «sd5u84» er samme kode. Basen ser også bort
+    // fra tegnene, men eldre utgaver av basen gjorde det ikke.
+    const ren = String(code || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (!ren) throw friendly({ message: "ukjent_kode" });
+    const { data, error } = await sb.rpc("join_trip", { p_code: ren, p_name: name });
     if (error) throw friendly(error);
     const t = Array.isArray(data) ? data[0] : data;
     // Feil kode gir et tomt svar, ikke en feil, så basen kan telle forsøket
@@ -229,6 +233,8 @@ const Api = (() => {
     if (m.includes("for_mange_meldinger")) return k("Du skriver fort. Vent et lite øyeblikk.");
     if (m.includes("for_mange_chatter")) return k("Du har laget mange chatter på denne turen. Rydd i dem først.");
     if (m.includes("ikke_innlogget")) return k("Appen fikk ikke kontakt med serveren. Prøv igjen.");
+    if (/violates check constraint/i.test(m)) return k("Noe av det du skrev, er for langt eller har feil form.");
+    if (m.includes("ugyldig_bilde")) return k("Bildet kunne ikke sendes. Prøv igjen.");
     if (m.includes("for_mange_forsok")) return k("For mange feil koder på kort tid. Vent et kvarter og prøv igjen.");
     // En feilkode vi ikke har tekst for (ord_med_understrek), eller en
     // teknisk melding fra basen, skal aldri vises som den er.
@@ -1253,7 +1259,12 @@ const Api = (() => {
     return { superadmin: sup, koder, kanLage: sup || koder.some(k => k.turerIgjen === null || k.turerIgjen > 0) };
   }
   async function losInnTilgang(kode) {
-    const { data, error } = await sb.rpc("los_inn_tilgang", { p_kode: kode });
+    // Skrevet uten bindestreker, med mellomrom eller små bokstaver: settes
+    // på formen TM-XXXX-XXXX før den sendes.
+    const ren = String(kode || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (!ren) throw friendly({ message: "ukjent_tilgang" });
+    const pen = /^TM[A-Z0-9]{8}$/.test(ren) ? `TM-${ren.slice(2, 6)}-${ren.slice(6)}` : ren;
+    const { data, error } = await sb.rpc("los_inn_tilgang", { p_kode: pen });
     if (error) throw friendly(error);
     // Feil kode er et svar, ikke en feil (utvidelse-35).
     if (data === "ukjent_tilgang") throw friendly({ message: "ukjent_tilgang" });
