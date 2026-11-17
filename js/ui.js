@@ -1855,7 +1855,9 @@ const UI = (() => {
       <p style="margin:7px 0 0;font-size:13.5px;color:var(--ink-2)">
         Da åpnes den som en app, husker deg${iOS
           ? ", og varsler begynner å virke — på iPhone finnes de bare for apper på hjemskjermen"
-          : " og kan gi deg varsler"}.</p>
+          : " og kan gi deg varsler"}.${iOS && Api.erAnonym() && S.trip
+          ? ` Appen på hjemskjermen husker ikke gjestekontoen fra Safari, så der skriver du turkoden <b>${esc(S.trip.code)}</b> én gang til.`
+          : ""}</p>
       ${hvordan}
       <button class="linkbtn" style="font-size:13px" id="skjulInstall">Ikke nå</button>
     </div>`;
@@ -2138,7 +2140,7 @@ const UI = (() => {
           <button class="listrow" data-sheet="koblepost">
             <span class="rikon">${ICON.post}</span>
             <div class="grow"><div class="nm">${Api.erAnonym() ? "Sikre kontoen" : "E-postadresse"}</div></div>
-            <span class="verdi">${Api.erAnonym() ? (erNativ() ? "Bare på denne telefonen" : "Bare i denne nettleseren") : esc(Api.minEpost() || "Innlogget")}</span>
+            <span class="verdi">${Api.erAnonym() ? (erNativ() ? "Bare på denne telefonen" : "Bare i nettleseren") : esc(Api.minEpost() || "Innlogget")}</span>
             <span class="chev">${ICON.chev}</span></button>
           <button class="listrow" data-sheet="kartvalg">
             <span class="rikon mose">${ICON.kart}</span>
@@ -3438,7 +3440,7 @@ const UI = (() => {
         <p class="err" id="tkErr" hidden></p>
         <button class="btn primary big" type="submit" id="tkOk">Bruk koden</button>
       </form>
-      ${Api.erAnonym() ? `<p class="muted" style="font-size:13.5px;margin:12px 0 0">Du er gjest. Koden hører til kontoen på denne telefonen.
+      ${Api.erAnonym() ? `<p class="muted" style="font-size:13.5px;margin:12px 0 0">Du er gjest. Koden hører til kontoen ${erNativ() ? "på denne telefonen" : "i denne nettleseren"}.
         Logger du inn med e-post først, beholder du tilgangen på en ny telefon.</p>` : ""}
       <button class="btn close" data-close>Avbryt</button>`);
     $("tkForm").addEventListener("submit", async e => {
@@ -6349,7 +6351,7 @@ const UI = (() => {
         <div class="skille"><span>eller</span></div>
         <button class="btn" style="width:100%" id="gjestKnapp">Fortsett som gjest</button>
         <p class="muted" style="margin-top:9px;text-align:center">
-          Som gjest bor kontoen bare på denne telefonen.</p>
+          Som gjest bor kontoen bare ${erNativ() ? "på denne telefonen" : "i denne nettleseren"}.</p>
         <p style="text-align:center;margin-top:22px;font-size:14.5px;color:var(--ink-2)">
           Er du reiseleder? <button type="button" class="linkbtn" id="gjestOgLag">Lag en ny tur</button>
         </p>` : ""}`;
@@ -7801,6 +7803,8 @@ const UI = (() => {
   document.addEventListener("keydown", e => {
     if (e.key !== "Escape") return;
     if (document.querySelector(".handlingsark-bg")) return;
+    // Meldingsmenyen ligger over alt annet, så den lukkes først.
+    if (document.querySelector(".kontekst-bg:not(.ut)") && kontekstLukk) return kontekstLukk();
     if (!$("sheetBg").hidden) return forsokLukkArk();
     if (lukkBilde()) return;
     if (S.side) return lukkSide();
