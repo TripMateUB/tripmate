@@ -19,7 +19,7 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap">
 <noscript><link rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap"></noscript>
-<link rel="stylesheet" href="styles.css?v=115">
+<link rel="stylesheet" href="styles.css?v=116">
 </head>
 <body>
 
@@ -45,8 +45,18 @@
   // workeren fikk en ny versjon, skal den ikke spilles om igjen.
   let sett = false;
   try { sett = Boolean(sessionStorage.getItem("tm.sett")); } catch {}
-  if (sett) return a.remove();
+  if (sett) {
+    try { if (localStorage.getItem("tk.lastTrip")) document.documentElement.classList.add("skjelett"); } catch {}
+    return a.remove();
+  }
   try { sessionStorage.setItem("tm.sett", "1"); } catch {}
+
+  // Har telefonen en tur fra før, står skjelettet av appen klart bak
+  // logoen (se OPPSTART under). Da glir logoen rett over i det når den
+  // er tegnet, og turen fylles inn der. Uten tur venter logoen på appen.
+  let skjelett = false;
+  try { skjelett = Boolean(localStorage.getItem("tk.lastTrip")); } catch {}
+  if (skjelett) document.documentElement.classList.add("skjelett");
 
   const mindre = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const LENGDE = mindre ? 420 : 1180;   // så lenge tegningen varer
@@ -66,6 +76,7 @@
   // til appen sier den har noe å vise. Taket er der fordi en feil også
   // skal fram — står det stille i fire sekunder, er det noe galt.
   const start = Date.now();
+  if (skjelett) { setTimeout(avslutt, LENGDE + 120); return; }
   let klar = false;
   addEventListener("tripmate:klar", () => {
     klar = true;
@@ -77,6 +88,23 @@
 
 <!-- ============ OPPSTART ============ -->
 <section id="bootScreen" class="join">
+  <!-- Skjelettet av appen, mens turen hentes. Vises bare når telefonen
+       har en tur fra før (html.skjelett). Samme mål som appen, så ingenting
+       hopper når innholdet kommer. -->
+  <div class="skjelettapp" aria-hidden="true">
+    <div class="sk-topp"><i class="sk sk-merke"></i><div class="sk-tekst"><i class="sk sk-l" style="width:46%"></i><i class="sk sk-s" style="width:30%"></i></div><i class="sk sk-rund"></i></div>
+    <div class="sk-innhold">
+      <i class="sk sk-tittel"></i><i class="sk sk-s" style="width:38%"></i>
+      <i class="sk sk-kort" style="height:96px"></i>
+      <div class="sk-rad"><i class="sk sk-chip"></i><i class="sk sk-chip"></i><i class="sk sk-chip"></i></div>
+      <div class="sk-liste">
+        <div class="sk-punkt"><i class="sk sk-s" style="width:44px"></i><div class="sk-tekst"><i class="sk sk-l" style="width:62%"></i><i class="sk sk-s" style="width:40%"></i></div></div>
+        <div class="sk-punkt"><i class="sk sk-s" style="width:44px"></i><div class="sk-tekst"><i class="sk sk-l" style="width:54%"></i><i class="sk sk-s" style="width:46%"></i></div></div>
+        <div class="sk-punkt"><i class="sk sk-s" style="width:44px"></i><div class="sk-tekst"><i class="sk sk-l" style="width:70%"></i><i class="sk sk-s" style="width:32%"></i></div></div>
+      </div>
+    </div>
+    <div class="sk-faner"><i class="sk sk-fane"></i><i class="sk sk-fane"></i><i class="sk sk-fane"></i><i class="sk sk-fane"></i></div>
+  </div>
   <div class="join-inner" style="text-align:center">
     <div class="mark" style="margin:0 auto 18px" aria-hidden="true">
       <svg viewBox="0 0 24 24"><path class="stamme" d="M11.5 8V21"/><path d="M5.8 10C7.1 9.6 8.1 8.8 11.4 8.05C13.7 7.5 15.6 5.9 17.8 4.85"/><circle cx="17.83" cy="4.83" r="1.83" fill="var(--merke)" stroke="none"/></svg>
@@ -169,14 +197,14 @@
 
 <div class="toast" id="toast" hidden></div>
 
-<script src="js/config.js?v=115"></script>
-<script src="vendor/supabase.js?v=115"></script>
-<script src="vendor/qrcode.js?v=115"></script>
-<script src="js/templates.js?v=115"></script>
-<script src="js/api.js?v=115"></script>
-<script src="js/parse.js?v=115"></script>
-<script src="js/ui.js?v=115"></script>
-<script src="js/native.js?v=115"></script>
+<script src="js/config.js?v=116"></script>
+<script src="vendor/supabase.js?v=116"></script>
+<script src="vendor/qrcode.js?v=116"></script>
+<script src="js/templates.js?v=116"></script>
+<script src="js/api.js?v=116"></script>
+<script src="js/parse.js?v=116"></script>
+<script src="js/ui.js?v=116"></script>
+<script src="js/native.js?v=116"></script>
 <script>
 
 // Safari regner 100dvh litt feil, og da blir appen kortere enn skjermen —

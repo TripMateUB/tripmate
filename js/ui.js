@@ -253,6 +253,10 @@ const UI = (() => {
      innloggingen eller en feilmelding. Uten dette ville den ligget til
      taket sitt og holdt appen skjult lenger enn nødvendig. */
   let harSagtKlar = false;
+  /* Skjelettet i oppstartsskjermen (index.html). Det skal vekk så snart
+     skjermen har en melding å vise, ellers ligger meldingen skjult bak. */
+  const skjelett = paa => document.documentElement.classList.toggle("skjelett", paa);
+
   function appKlar() {
     if (harSagtKlar) return;
     harSagtKlar = true;
@@ -294,6 +298,7 @@ const UI = (() => {
         return openTrip(last);
       }
       appKlar();
+      skjelett(false);
       $("bootMsg").innerHTML = `Fikk ikke kontakt med serveren.<br>
         <span style="font-size:13px;color:var(--ink-3)">${esc(res.error || res.reason)}</span><br>
         <button class="btn" style="margin-top:14px" onclick="location.reload()">Prøv igjen</button>`;
@@ -350,6 +355,7 @@ const UI = (() => {
   }
 
   function bootSetup() {
+    skjelett(false);
     $("bootMsg").innerHTML = `
       <b style="font-family:"DM Sans",sans-serif">Appen mangler serveroppsett</b><br>
       <span style="font-size:14px;color:var(--ink-2)">Fyll inn prosjektadresse og anon-nøkkel i
@@ -441,6 +447,7 @@ const UI = (() => {
     let trip = lagret;
     if (!trip) {
       $("bootMsg").innerHTML = venter("Henter turen");
+      skjelett(true);
       try { trip = await Api.loadTrip(tripId); }
       catch (e) {
         // Fjernet fra turen: da skal ikke appen bli stående med en gammel
