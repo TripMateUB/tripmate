@@ -1418,3 +1418,9 @@ html.nativ .composer input:focus{border-color:var(--ink-3)}
 
 /* Chatreglene: en luftig liste, ikke en tekstvegg. */
 .regler{margin:0 0 14px;padding-left:20px;display:flex;flex-direction:column;gap:8px;color:var(--ink);font-size:15.5px;line-height:1.45}
+
+/* Tilgangskoder: koden er det man skal se og kopiere. */
+.tilgangkort{display:flex;flex-direction:column;gap:6px}
+.tilgangkort.av{opacity:.6}
+.kodeknapp{align-self:flex-start;border:0;background:var(--surface-2);border-radius:8px;padding:6px 10px;
+  font-weight:700;font-size:17px;letter-spacing:.06em;cursor:pointer;color:var(--ink)}

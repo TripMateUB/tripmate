@@ -659,7 +659,7 @@ const UI = (() => {
     // Én rad per reise du mangler plass på, og bare der du kan velge selv.
     // Fordeler reiselederen, er det ikke noe du kan gjøre. «Fredag og
     // søndag» sier hva som mangler; «2 kjøretøy» sa det ikke.
-    const reiser = tall.seteGrupper || [];
+    const reiser = har("seter") ? (tall.seteGrupper || []) : [];
     const mangler = reiser.filter(g => g.fritt && !g.harPlass);
     if (mangler.length) {
       rader.push({
@@ -672,14 +672,14 @@ const UI = (() => {
 
     // Har reiselederen fordelingen, er det ikke noe du kan gjøre, og da
     // er det ikke noe som venter på deg heller.
-    if (tall.rom && !tall.harRom && S.trip.romFritt) {
+    if (har("rom") && tall.rom && !tall.harRom && S.trip.romFritt) {
       rader.push({ side: "rom", hva: "Du har ikke valgt rom", hvorfor: "Rom" });
     }
 
     const igjen = (tall.pakkTotalt || 0) - (tall.pakkKrysset || 0);
     // Når turen har startet, er det for sent å pakke. Da maser ikke lista.
     const startet = S.trip.days.length && S.trip.days[0].date <= today();
-    if (igjen > 0 && !startet) {
+    if (har("pakk") && igjen > 0 && !startet) {
       rader.push({
         side: "pakk",
         hva: `${igjen} ${igjen === 1 ? "ting" : "ting"} står ukrysset`,
@@ -705,7 +705,7 @@ const UI = (() => {
      noe er om du mangler en plass et sted. */
   function setetekst(tall) {
     if (!tall) return "";
-    if (!tall.kjoretoy) return "Ikke satt opp";
+    if (!tall.kjoretoy) return S.trip.role === "leader" ? "Ikke satt opp" : "";
     const reiser = tall.seteGrupper || [];
     const liste = tall.mineSeterListe || [];
     const mangler = reiser.filter(g => g.fritt && !g.harPlass).length;
@@ -726,62 +726,49 @@ const UI = (() => {
   }
   const oppramsing = d => d.length < 2 ? (d[0] || "") : d.slice(0, -1).join(", ") + " og " + d[d.length - 1];
 
+  /* Delene en tur kan ha (utvidelse-34). Program og chat har alle turer.
+     Det som er av, vises ikke for noen, så en tur uten buss og rom ikke
+     står full av tomme knapper. */
+  const FUNKSJONER = [
+    ["pakk", "Pakkeliste", "Felles liste. Hver deltaker krysser av for seg selv."],
+    ["seter", "Sitteplasser", "Setekart for buss, tog og biler."],
+    ["rom", "Rom", "Hvem som bor på hvilket rom."],
+    ["dokumenter", "Dokumenter", "Billetter, heftet og forsikring."],
+    ["kontakt", "Nødnummer", "Numre alle på turen kan ringe."],
+    ["paaroerende", "Nærmeste pårørende", "Hver deltaker oppgir én person. Bare reiselederne ser det."],
+    ["bilder", "Bilder i chatten", "Slettes 30 dager etter siste programdag."],
+    ["opprop", "Opprop", "Hak av at alle er med. Bare for reiseledere."]
+  ];
+  // pårørende og bilder ligger i egne kolonner fra før, resten i funksjoner.
+  function har(k) {
+    const t = S.trip;
+    if (!t) return true;
+    if (k === "paaroerende") return t.paaroerende === true;
+    if (k === "bilder") return t.bilder !== false;
+    return !t.funksjoner || t.funksjoner[k] !== false;
+  }
+
   function praktisk() {
     const tall = S.megTall;
     const leder = S.trip.role === "leader";
+    const rad = (side, ikon, farge, navn, verdi) => `<button class="listrow" data-side="${side}">
+          <span class="rikon${farge ? " " + farge : ""}">${ikon}</span>
+          <div class="grow"><div class="nm">${navn}</div></div>
+          ${verdi ? `<span class="verdi">${verdi}</span>` : ""}
+          <span class="chev">${ICON.chev}</span></button>`;
+    const rader = [
+      har("pakk") && rad("pakk", ICON.sekk, "mose", "Pakkeliste",
+        tall ? (tall.pakkTotalt ? `${tall.pakkKrysset} av ${tall.pakkTotalt}` : "") : ""),
+      har("seter") && rad("seter", ICON.sete, "", "Sitteplasser", setetekst(tall)),
+      har("rom") && rad("rom", ICON.nokkel, "grunn", "Rom", romtekst(tall)),
+      (har("kontakt") || har("paaroerende")) && rad("kontakt", ICON.telefon, "gul", "Telefonnumre", ""),
+      har("dokumenter") && rad("dokumenter", ICON.post, "", "Dokumenter", ""),
+      leder && har("opprop") && rad("opprop", ICON.opprop, "", "Opprop", "")
+    ].filter(Boolean);
+    if (!rader.length) return "";
     return `<div>
       <div class="eyebrow" style="margin-bottom:8px">Praktisk</div>
-      <div class="gruppe"><div class="list">
-        <button class="listrow" data-side="pakk">
-          <span class="rikon mose">${ICON.sekk}</span>
-          <div class="grow"><div class="nm">Pakkeliste</div></div>
-          <span class="verdi">${tall
-            ? (tall.pakkTotalt ? `${tall.pakkKrysset} av ${tall.pakkTotalt}` : "Ingen punkter")
-            : ""}</span>
-          <span class="chev">${ICON.chev}</span></button>
-
-        ${leder || !tall || tall.kjoretoy ? `<button class="listrow" data-side="seter">
-          <span class="rikon">${ICON.sete}</span>
-          <div class="grow"><div class="nm">Sitteplasser</div></div>
-          <span class="verdi">${setetekst(tall)}</span>
-          <span class="chev">${ICON.chev}</span></button>` : ""}
-
-        ${leder || !tall || tall.rom ? `<button class="listrow" data-side="rom">
-          <span class="rikon grunn">${ICON.nokkel}</span>
-          <div class="grow"><div class="nm">Rom</div></div>
-          <span class="verdi">${romtekst(tall)}</span>
-          <span class="chev">${ICON.chev}</span></button>` : ""}
-
-        <button class="listrow" data-side="kontakt">
-          <span class="rikon gul">${ICON.telefon}</span>
-          <div class="grow"><div class="nm">Nødnummer</div>
-            <div class="sub">Hvem ringer du, og på hvilket nummer</div></div>
-          <span class="chev">${ICON.chev}</span></button>
-
-        <button class="listrow" data-side="dokumenter">
-          <span class="rikon">${ICON.post}</span>
-          <div class="grow"><div class="nm">Dokumenter</div>
-            <div class="sub">Heftet, billetter og forsikring</div></div>
-          <span class="chev">${ICON.chev}</span></button>
-
-        <button class="listrow" data-kalender="1">
-          <span class="rikon mose">${ICON.cal}</span>
-          <div class="grow"><div class="nm">Legg programmet i kalenderen</div>
-            <div class="sub">Med adresse, så telefonen kan si fra når du må dra</div></div>
-          <span class="chev">${ICON.chev}</span></button>
-
-        ${S.trip.paaroerende ? `<button class="listrow" data-sheet="paaroerende">
-          <span class="rikon gul">${ICON.telefon}</span>
-          <div class="grow"><div class="nm">Nærmeste pårørende</div>
-            <div class="sub">Hvem reiselederne ringer hvis noe skjer deg</div></div>
-          <span class="chev">${ICON.chev}</span></button>` : ""}
-
-        ${leder ? `<button class="listrow" data-side="opprop">
-          <span class="rikon">${ICON.opprop}</span>
-          <div class="grow"><div class="nm">Opprop</div>
-            <div class="sub">Hak av at alle er med</div></div>
-          <span class="chev">${ICON.chev}</span></button>` : ""}
-      </div></div>
+      <div class="gruppe"><div class="list">${rader.join("")}</div></div>
     </div>`;
   }
 
@@ -1045,7 +1032,8 @@ const UI = (() => {
             return `<div class="paamerke${jeg ? " min" : ""}">${jeg ? "✓ påmeldt" : "Påmelding"}
               · ${folk.length}${i.plasser ? "/" + i.plasser : ""}</div>`;
           })() : ""}
-          <div class="place">${p ? ICON.pin + esc(p.name) : `<span style="color:var(--ink-3)">${esc(i.note || "Ikke stedfestet")}</span>`}</div>
+          ${p ? `<div class="place">${ICON.pin + esc(p.name)}</div>`
+            : i.note ? `<div class="place"><span style="color:var(--ink-3)">${esc(i.note)}</span></div>` : ""}
           ${S.edit ? `<div class="redigerrad">
             <span class="draha" data-drag aria-label="Dra for å flytte">⠿</span>
             <button class="minibtn fare" data-delitem="${esc(i.id)}">Slett</button>
@@ -1063,7 +1051,10 @@ const UI = (() => {
       <div>
         <div class="eyebrow" style="margin-bottom:7px;display:flex;justify-content:space-between;gap:8px;align-items:center">
           <span>${hotel ? "Bor på " + esc(hotel.name) : ""}</span>
-          ${leader ? `<button class="linkbtn" style="font-size:11px" data-edit>${S.edit ? "Ferdig" : "Rediger"}</button>` : ""}
+          <span style="display:flex;gap:16px">
+            ${trip.days.some(x => x.items.some(i => i.t)) && !S.edit ? `<button class="linkbtn" style="font-size:11px" data-kalender="1">Til kalender</button>` : ""}
+            ${leader ? `<button class="linkbtn" style="font-size:11px" data-edit>${S.edit ? "Ferdig" : "Rediger"}</button>` : ""}
+          </span>
         </div>
         ${dagensVaer(d)}
         ${S.edit ? `<p class="muted" style="margin:0 0 9px;font-size:13px">Punkter med klokkeslett står alltid etter tiden. Dra for å flytte punkter uten tid, eller punkter som starter samtidig.</p>` : ""}
@@ -1287,7 +1278,7 @@ const UI = (() => {
       <div id="chatlistBoks">
       <div class="chatlist">${rows}</div>
       <button class="btn" data-sheet="newchannel" style="width:100%">Ny chat</button>
-      <p class="muted">En chat er enten åpen for hele turen, eller privat for dem du legger til.</p>
+
       </div>`;
   }
 
@@ -1864,8 +1855,13 @@ const UI = (() => {
 
           ${leder ? `<button class="listrow" data-sheet="importpdf">
             <span class="rikon">${ICON.last}</span>
-            <div class="grow"><div class="nm">Les inn program fra PDF</div>
-              <div class="sub">Programmet, bussplanen eller billettene</div></div>
+            <div class="grow"><div class="nm">Les inn program fra PDF</div></div>
+            <span class="chev">${ICON.chev}</span></button>` : ""}
+
+          ${leder ? `<button class="listrow" data-sheet="funksjoner">
+            <span class="rikon mose">${ICON.koffert}</span>
+            <div class="grow"><div class="nm">Funksjoner</div></div>
+            <span class="verdi">${FUNKSJONER.filter(([k]) => har(k)).length} av ${FUNKSJONER.length}</span>
             <span class="chev">${ICON.chev}</span></button>` : ""}
 
           ${leder ? `<button class="listrow" data-sheet="endretur">
@@ -1876,27 +1872,23 @@ const UI = (() => {
 
           <button class="listrow" data-copy="${esc(trip.code)}">
             <span class="rikon grunn">${ICON.nokkel}</span>
-            <div class="grow"><div class="nm">Turkode</div>
-              <div class="sub">Trykk for å kopiere</div></div>
+            <div class="grow"><div class="nm">Turkode</div></div>
             <b class="mono" style="font-size:17px;letter-spacing:.09em">${esc(trip.code)}</b></button>
 
           ${leder && trip.slettes ? `<button class="listrow" data-sheet="sletting">
             <span class="rikon grunn">${ICON.cal}</span>
-            <div class="grow"><div class="nm">Slettes automatisk</div>
-              <div class="sub">60 dager etter siste programdag</div></div>
+            <div class="grow"><div class="nm">Slettes automatisk</div></div>
             <span class="verdi">${esc(sletteTekst(trip.slettes))}</span>
             <span class="chev">${ICON.chev}</span></button>` : ""}
 
           ${leder ? `<button class="listrow" data-sheet="delkode">
             <span class="rikon grunn">${ICON.nav}</span>
-            <div class="grow"><div class="nm">Del turkoden</div>
-              <div class="sub">QR-kode og lenke som fyller inn koden</div></div>
+            <div class="grow"><div class="nm">Del turkoden</div></div>
             <span class="chev">${ICON.chev}</span></button>` : ""}
 
           ${leder ? `<button class="listrow" data-sheet="byttkode">
             <span class="rikon gul">${ICON.spark}</span>
-            <div class="grow"><div class="nm">Ny turkode</div>
-              <div class="sub">Når koden har kommet ut til flere enn den skulle</div></div>
+            <div class="grow"><div class="nm">Lag ny turkode</div></div>
             <span class="chev">${ICON.chev}</span></button>` : ""}
         </div></div>
       </div>`;
@@ -1943,6 +1935,11 @@ const UI = (() => {
             <span class="verdi"${varslerAv ? ' style="color:var(--amber)"' : ""}>${esc(varselTekst)}</span>
             <span class="chev">${ICON.chev}</span></button>
 
+          ${S.superadmin ? `<button class="listrow" data-side="tilgang">
+            <span class="rikon mose">${ICON.nokkel}</span>
+            <div class="grow"><div class="nm">Tilgangskoder</div></div>
+            <span class="chev">${ICON.chev}</span></button>` : ""}
+
           ${Api.blokkertListe().length ? `<button class="listrow" data-sheet="blokkerte">
             <span class="rikon grunn">${ICON.folk}</span>
             <div class="grow"><div class="nm">Blokkerte personer</div></div>
@@ -1951,9 +1948,7 @@ const UI = (() => {
 
           <button class="listrow" data-sheet="omvisning">
             <span class="rikon mose">${ICON.info}</span>
-            <div class="grow"><div class="nm">Omvisning i appen</div>
-              <div class="sub">${trip.role === "leader"
-                ? "Det du som reiseleder styrer" : "Hva du finner hvor"}</div></div>
+            <div class="grow"><div class="nm">Omvisning i appen</div></div>
             <span class="chev">${ICON.chev}</span></button>
         </div></div>
       </div>
@@ -2034,7 +2029,8 @@ const UI = (() => {
     if (side) {
       const sidenavn = { deltakere: "Deltakere og roller", varsler: "Varsler", chat: "Om chatten", rom: "Rom",
                          pakk: "Pakkeliste", seter: "Sitteplasser",
-                         kontakt: "Nødnummer", opprop: "Opprop", dokumenter: "Dokumenter" };
+                         kontakt: "Telefonnumre", opprop: "Opprop", dokumenter: "Dokumenter",
+                         tilgang: "Tilgangskoder" };
       $("convName").textContent = sidenavn[side] || "";
       $("convSub").textContent = S.trip.name;
     } else if (conv) {
@@ -2092,6 +2088,7 @@ const UI = (() => {
                           : side === "opprop" ? viewOpprop()
                           : side === "deltakere" ? viewDeltakere()
                           : side === "dokumenter" ? viewDokumenter()
+                          : side === "tilgang" ? viewTilgang()
                           : visningFor(S.tab);
     if (side === "varsler") settOppVarsler();
     if (byttetVisning && !conv) $("screen").scrollTop = 0;
@@ -2310,6 +2307,7 @@ const UI = (() => {
   function hentMegTall(tvang) {
     if (!S.trip || (S.megTall && !tvang)) return;
     if (S.trip.role === "leader") Api.rapportListe(S.trip.id).then(r => { S.rapporter = r; }).catch(() => {});
+    if (S.superadmin === undefined) Api.minTilgang().then(t => { S.superadmin = !!t.superadmin; }).catch(() => {});
     Api.megTall(S.trip.id).then(t => {
       S.megTall = t;
       if (S.trip && (S.tab === "meg" || S.tab === "turen" || S.tab === "program") && !S.side && !S.openChat) render();
@@ -3136,40 +3134,86 @@ const UI = (() => {
      oppdiktet program. Spørsmålene under har ingen svar valgt på forhånd
      (L2) — en reiseleder skal ta stilling til dem, ikke arve et valg hen
      aldri så. Alt kan endres senere. */
-  function sheetNewTrip() {
+  /* Å lage en tur krever tilgang fra TripMate (utvidelse-34). Har du
+     ingen, ber arket om tilgangskoden. Har du, viser det grensene. */
+  async function sheetNewTrip() {
+    openSheet(`<h3>Lag en ny tur</h3>${venter("Sjekker tilgangen")}<button class="btn close" data-close>Avbryt</button>`);
+    const tilgang = await Api.minTilgang().catch(() => ({ gammel: true }));
+    if (!tilgang.gammel && !tilgang.kanLage) return sheetTilgangskode(tilgang);
+    sheetTurSkjema(tilgang);
+  }
+
+  function sheetTilgangskode(tilgang) {
+    const brukt = (tilgang.koder || []).length > 0;
+    openSheet(`<h3>Lag en ny tur</h3>
+      <p class="lede">${brukt
+        ? "Tilgangen din har ingen turer igjen. Har du fått en ny kode fra TripMate, skriv den her."
+        : "For å lage turer trenger du en tilgangskode fra TripMate."}</p>
+      <form id="tkForm" novalidate>
+        <div class="field"><label for="tkKode">Tilgangskode</label>
+          <input id="tkKode" class="kodefelt" placeholder="TM-XXXX-XXXX" autocapitalize="characters"
+            autocorrect="off" spellcheck="false" autocomplete="off"></div>
+        <p class="err" id="tkErr" hidden></p>
+        <button class="btn primary big" type="submit" id="tkOk">Bruk koden</button>
+      </form>
+      ${Api.erAnonym() ? `<p class="muted" style="font-size:13.5px;margin:12px 0 0">Du er gjest. Koden hører til kontoen på denne telefonen.
+        Logger du inn med e-post først, beholder du tilgangen på en ny telefon.</p>` : ""}
+      <button class="btn close" data-close>Avbryt</button>`);
+    $("tkForm").addEventListener("submit", async e => {
+      e.preventDefault();
+      const kode = $("tkKode").value.trim(), btn = $("tkOk"), err = $("tkErr");
+      if (!kode) { err.textContent = "Skriv koden."; err.hidden = false; return; }
+      btn.disabled = true; btn.innerHTML = prikker() + " Sjekker";
+      try { await Api.losInnTilgang(kode); sheetNewTrip(); }
+      catch (e2) { btn.disabled = false; btn.textContent = "Bruk koden"; err.textContent = e2.message; err.hidden = false; }
+    });
+  }
+
+  function sheetTurSkjema(tilgang) {
     const p = Api.getProfile();
     // Spørsmålet er en setning, ikke en overskrift. Korte svar (Ja/Nei)
     // står side om side.
-    const sporsmaal = (navn, tittel, under, valg) => `<fieldset class="spm">
+    const sporsmaal = (navn, tittel, under, valg) => `<fieldset class="spm" id="spm_${navn}">
       <legend>${tittel}</legend>
       ${under ? `<small>${under}</small>` : ""}
       <div class="picks${valg.every(x => !x[2]) ? " to" : ""}">${valg.map(([v, t, f]) => `<label class="pick"><input type="radio" name="${navn}" value="${v}">
         <span><b>${t}</b>${f ? `<br><small>${f}</small>` : ""}</span></label>`).join("")}</div>
     </fieldset>`;
+    // Har kontoen en grense, står den øverst, så ingen blir overrasket
+    // når nummer 51 ikke kommer inn.
+    const k = (tilgang.koder || []).find(x => x.turerIgjen === null || x.turerIgjen > 0);
+    const grense = !tilgang.superadmin && k ? `<p class="muted" style="margin:0 0 14px">Opptil ${k.maksDeltakere} personer per tur${
+      k.turerIgjen === null ? "" : ` · ${k.turerIgjen === 1 ? "1 tur" : k.turerIgjen + " turer"} igjen`}.</p>` : "";
 
-    openSheet(`<h3>Lag en ny tur</h3>
-      <p class="muted" style="margin:6px 0 14px">Du blir reiseleder og får en turkode å dele ut.</p>
+    openSheet(`<h3 style="margin-bottom:14px">Lag en ny tur</h3>
+      ${grense}
       <form id="newTripForm" novalidate>
         ${p ? "" : `<div class="field"><label for="tFirst">Ditt fornavn</label><input id="tFirst" autocapitalize="words" autocorrect="off" spellcheck="false" autocomplete="given-name"></div>
                     <div class="field"><label for="tLast">Ditt etternavn</label><input id="tLast" autocapitalize="words" autocorrect="off" spellcheck="false" autocomplete="family-name"></div>`}
         <div class="field"><label for="tName">Navn på turen</label><input id="tName" placeholder="Barcelona 2027"></div>
         <div class="field"><label for="tOrg">Gruppe</label><input id="tOrg" placeholder="Sandnes IL G16, salgsavdelingen eller 10B"></div>
         ${sporsmaal("tProgram", "Hvordan vil du lage programmet?", "", [
-          ["pdf", "Les inn fra PDF", "Har du programmet som PDF, leser appen det og viser et forslag."],
-          ["selv", "Jeg legger det inn selv", "Dag for dag, punkt for punkt."]])}
-        <div class="eyebrow" style="margin:6px 0 10px">Innstillinger · kan endres senere</div>
-        ${sporsmaal("tGodkjenn", "Skal du slippe inn hver deltaker selv?", "Ellers holder turkoden.", [
-          ["ja", "Ja, jeg godkjenner alle", "Du ser navnet før noen slipper inn."], ["nei", "Nei, turkoden holder"]])}
-        ${sporsmaal("tBilder", "Kan deltakerne sende bilder i chatten?", "Bildene slettes 30 dager etter siste programdag.", [
-          ["ja", "Ja"], ["nei", "Nei"]])}
+          ["pdf", "Les inn fra PDF", "Appen leser PDF-en og viser et forslag."],
+          ["selv", "Jeg legger det inn selv", ""]])}
+        <fieldset class="spm"><legend>Hva skal turen ha?</legend>
+          <small>Program og chat har alle turer. Resten kan endres senere under Turen.</small>
+          <div class="gruppe" style="margin-top:10px"><div class="list">${funksjonsrader(() => false, "nf_")}</div></div>
+        </fieldset>
         ${sporsmaal("tFordel", "Hvem velger seter og rom?", "", [
-          ["selv", "Deltakerne velger selv", "Du kan fortsatt flytte folk."], ["leder", "Jeg fordeler"]])}
-        ${sporsmaal("tPaar", "Skal deltakerne oppgi nærmeste pårørende?", "Navn og telefon. Bare reiselederne ser det, og det slettes med turen.", [
-          ["ja", "Ja"], ["nei", "Nei"]])}
+          ["selv", "Deltakerne selv", ""], ["leder", "Jeg fordeler", ""]])}
+        ${sporsmaal("tGodkjenn", "Skal du slippe inn hver deltaker selv?", "", [
+          ["ja", "Ja", ""], ["nei", "Nei, turkoden holder", ""]])}
         <p class="err" id="tErr" hidden></p>
-        <button class="btn primary big" type="submit" id="tSubmit">Opprett turen</button>
+        <button class="btn primary big" type="submit" id="tSubmit">Lag turen</button>
       </form>
       <button class="btn close" data-close>Avbryt</button>`);
+
+    // Seter og rom-spørsmålet står bare når turen har en av delene.
+    const valgt = k2 => $("nf_" + k2).checked;
+    const visFordeling = () => { $("spm_tFordel").hidden = !(valgt("seter") || valgt("rom")); };
+    visFordeling();
+    $("nf_seter").addEventListener("change", visFordeling);
+    $("nf_rom").addEventListener("change", visFordeling);
 
     $("newTripForm").addEventListener("submit", async e => {
       e.preventDefault();
@@ -3185,23 +3229,28 @@ const UI = (() => {
       }
       const name = $("tName").value.trim();
       if (!name) return vis("Turen trenger et navn.");
-      const mangler = [["tProgram", "hvordan programmet skal lages"], ["tGodkjenn", "godkjenning av deltakere"],
-        ["tBilder", "bilder i chatten"], ["tFordel", "hvem som velger seter og rom"], ["tPaar", "nærmeste pårørende"]]
-        .filter(([n]) => !svar(n)).map(([, t]) => t);
+      const trengerFordeling = valgt("seter") || valgt("rom");
+      const mangler = [["tProgram", "hvordan programmet skal lages"],
+        trengerFordeling && ["tFordel", "hvem som velger seter og rom"],
+        ["tGodkjenn", "om du slipper inn deltakerne selv"]]
+        .filter(Boolean).filter(([n]) => !svar(n)).map(([, t]) => t);
       if (mangler.length) return vis("Svar på: " + mangler.join(", ") + ".");
 
       btn.disabled = true; btn.innerHTML = prikker() + " Lager turen";
       try {
         const trip = await Api.createTrip({ name, org: $("tOrg").value.trim(), dates: "", leaderName: prof.name });
-        const fritt = svar("tFordel") === "selv";
+        const fritt = svar("tFordel") !== "leder";
+        const f = {};
+        for (const [k2] of FUNKSJONER) if (k2 !== "paaroerende" && k2 !== "bilder") f[k2] = valgt(k2);
         // Innstillingene settes etter at turen finnes. Feiler én av dem,
-        // finnes turen likevel, og valget kan tas igjen under Deltakere.
+        // finnes turen likevel, og valget kan tas igjen under Turen.
         await Promise.all([
+          Api.settFunksjoner(trip.id, f),
           Api.setKrevGodkjenning(trip.id, svar("tGodkjenn") === "ja"),
-          Api.setBilderPaa(trip.id, svar("tBilder") === "ja"),
+          Api.setBilderPaa(trip.id, valgt("bilder")),
           Api.settRomvalg(trip.id, { fritt }),
           Api.setSeterFritt(trip.id, fritt),
-          svar("tPaar") === "ja" ? Api.settPaaroerende(trip.id, true) : null
+          valgt("paaroerende") ? Api.settPaaroerende(trip.id, true) : null
         ].map(x => Promise.resolve(x).catch(() => null)));
 
         closeSheet();
@@ -3211,8 +3260,48 @@ const UI = (() => {
         toast("Turen er laget. Kode: " + trip.code);
         if (svar("tProgram") === "pdf") sheetImportPdf();
       } catch (e2) {
-        btn.disabled = false; btn.textContent = "Opprett turen";
+        btn.disabled = false; btn.textContent = "Lag turen";
+        if (e2 && /tilgangskode/.test(e2.message || "")) return sheetTilgangskode({ koder: [] });
         vis(e2.message);
+      }
+    });
+  }
+
+  /* Bryterne for funksjonene. Samme rader når turen lages og når den
+     endres senere. */
+  const funksjonsrader = (paa, prefiks) => FUNKSJONER.map(([k, navn, under]) => `
+    <label class="listrow" style="cursor:pointer">
+      <div class="grow"><div class="nm">${navn}</div><div class="sub">${under}</div></div>
+      <input type="checkbox" class="bryter" id="${prefiks}${k}" data-funk="${k}"${paa(k) ? " checked" : ""}></label>`).join("");
+
+  function sheetFunksjoner() {
+    openSheet(`<h3>Funksjoner</h3>
+      <p class="lede">Det som er av, vises ikke for noen på turen.</p>
+      <div class="gruppe"><div class="list">${funksjonsrader(har, "fu_")}</div></div>
+      <p class="err" id="fuErr" hidden></p>
+      <button class="btn primary big" id="fuLagre" style="margin-top:14px">Lagre</button>
+      <button class="btn close" data-close>Avbryt</button>`);
+    $("fuLagre").addEventListener("click", async e => {
+      const b = e.currentTarget;
+      const valgt = k => $("fu_" + k).checked;
+      if (har("paaroerende") && !valgt("paaroerende") &&
+          !await bekreft("Skru av nærmeste pårørende? Alt deltakerne har lagt inn, slettes.")) return sheetFunksjoner();
+      b.disabled = true; b.innerHTML = prikker() + " Lagrer";
+      try {
+        const f = {};
+        for (const [k] of FUNKSJONER) if (k !== "paaroerende" && k !== "bilder") f[k] = valgt(k);
+        await Api.settFunksjoner(S.trip.id, f);
+        if (valgt("bilder") !== har("bilder")) await Api.setBilderPaa(S.trip.id, valgt("bilder"));
+        if (valgt("paaroerende") !== har("paaroerende")) await Api.settPaaroerende(S.trip.id, valgt("paaroerende"));
+        S.trip.funksjoner = Object.assign({}, S.trip.funksjoner, f);
+        S.trip.bilder = valgt("bilder");
+        S.trip.paaroerende = valgt("paaroerende");
+        closeSheet();
+        render();
+        toast("Lagret.");
+      } catch (err) {
+        b.disabled = false; b.textContent = "Lagre";
+        const e2 = $("fuErr"); e2.textContent = err.message || "Klarte ikke lagre."; e2.hidden = false;
       }
     });
   }
@@ -3250,12 +3339,12 @@ const UI = (() => {
       const feil = !navn ? "Skriv navnet." : telnummer(telefon).length < 5 ? "Skriv et telefonnummer."
         : !$("paSamtykke").checked ? "Kryss av for at det er greit at reiselederne ser dette." : null;
       if (feil) { err.textContent = feil; err.hidden = false; return; }
-      try { await Api.lagrePaaroerende(S.trip.id, { navn, telefon }); closeSheet(); toast("Lagret. Bare reiselederne ser det."); }
+      try { await Api.lagrePaaroerende(S.trip.id, { navn, telefon }); closeSheet(); toast("Lagret. Bare reiselederne ser det."); if (S.side === "kontakt") aapneKontakt(true); }
       catch (e2) { err.textContent = e2.message; err.hidden = false; }
     });
     const slett = $("paSlett");
     if (slett) slett.addEventListener("click", async () => {
-      try { await Api.slettPaaroerende(S.trip.id); closeSheet(); toast("Opplysningene er slettet."); }
+      try { await Api.slettPaaroerende(S.trip.id); closeSheet(); toast("Opplysningene er slettet."); if (S.side === "kontakt") aapneKontakt(true); }
       catch (e2) { toast(e2.message || "Klarte ikke slette."); }
     });
   }
@@ -3961,12 +4050,20 @@ const UI = (() => {
     if (S.side === "rom") render();
   }
 
+  /* Telefonnumre: nødnummerene og nærmeste pårørende på ett sted. */
   async function aapneKontakt(fraHistorikk) {
-    S.side = "kontakt"; S.kontakt = null; S.kontaktFeil = false;
+    S.side = "kontakt"; S.kontakt = null; S.kontaktFeil = false; S.paarTlf = null;
     if (!fraHistorikk) history.pushState({ side: "kontakt" }, "");
     render();
-    try { S.kontakt = await Api.kontakter(S.trip.id); }
-    catch { S.kontakt = { liste: [] }; S.kontaktFeil = true; }
+    const leder = S.trip.role === "leader";
+    const [k, p] = await Promise.all([
+      har("kontakt") ? Api.kontakter(S.trip.id).catch(() => { S.kontaktFeil = true; return { liste: [] }; }) : { liste: [] },
+      !har("paaroerende") ? null
+        : leder ? Promise.all([Api.tripMembers(S.trip.id), Api.paaroerendeListe(S.trip.id)])
+                    .then(([folk, kart]) => ({ folk, kart })).catch(() => ({ folk: [], kart: new Map() }))
+        : Api.minPaaroerende(S.trip.id).then(mitt => ({ mitt })).catch(() => ({ mitt: null }))
+    ]);
+    S.kontakt = k; S.paarTlf = p;
     if (S.side === "kontakt") render();
   }
 
@@ -4022,9 +4119,9 @@ const UI = (() => {
     return `
       ${utenNett(liste)}
       <p class="muted" style="margin:0">${alle.length
-        ? `${klart} av ${alle.length} klart. Det du krysser av er ditt — ingen andre ser det.`
-        : leder ? "Lag lista her. Alle på turen ser punktene og krysser av for seg selv."
-                : "Reiselederen har ikke lagt inn noe ennå. Du kan legge inn dine egne ting under."}</p>
+        ? `${klart} av ${alle.length} klart. Bare du ser hva du har krysset av.`
+        : leder ? "Alle ser punktene og krysser av for seg selv."
+                : "Ingen punkter ennå. Du kan legge inn dine egne under."}</p>
 
       ${del("Fra reiselederen", leder
         ? "Ingen felles punkter ennå."
@@ -4057,8 +4154,8 @@ const UI = (() => {
     if (!kart.length) return `
       ${utenNett(S.setekart)}
       <p class="muted" style="margin:0">${leder
-        ? "Legg inn hvert kjøretøy turen bruker, og hvilken dag det gjelder. Buss ned og tog hjem er to reiser, og hver deltaker får én plass på hver. Flere biler samme dag er én reise: hver deltaker sitter i én av dem."
-        : "Reiselederen har ikke satt opp noe setekart ennå."}</p>
+        ? "Legg inn kjøretøyene og hvilken dag de kjører."
+        : "Ikke satt opp ennå."}</p>
       ${nyknapp}`;
 
     return `
@@ -4412,8 +4509,8 @@ const UI = (() => {
     if (!rom.length) return `
       ${utenNett(S.rom)}
       <p class="muted" style="margin:0">${leder
-        ? "Legg inn rommene, så fordeler du folk på dem. Alle ser hvem de bor med."
-        : "Reiselederen har ikke satt opp rom ennå."}</p>
+        ? "Legg inn rommene, så fordeler du folk på dem."
+        : "Ikke satt opp ennå."}</p>
       ${nyknapp}`;
 
     const uten = alle.filter(p => !p.rom);
@@ -4589,35 +4686,64 @@ const UI = (() => {
      telefonen ikke tåler i en tel:-lenke. */
   function viewKontakt() {
     const leder = S.trip.role === "leader";
-    if (S.kontaktFeil) return '<p class="muted">Klarte ikke hente nummerene. Sjekk nettet og prøv igjen.</p>';
     if (!S.kontakt) return venter("Henter nummerene");
+    return utenNett(S.kontakt) + nodnummer(leder) + paaroerendeDel(leder);
+  }
+
+  function nodnummer(leder) {
+    if (!har("kontakt")) return "";
+    if (S.kontaktFeil) return '<p class="muted" style="margin:0">Klarte ikke hente nummerene. Sjekk nettet og prøv igjen.</p>';
     const liste = S.kontakt.liste || [];
-
-    const nyknapp = leder
-      ? `<button class="btn big" data-nykontakt="1">Legg til nummer</button>` : "";
-
-    if (!liste.length) return `
-      ${utenNett(S.kontakt)}
-      <p class="muted" style="margin:0">${leder
-        ? "Legg inn deg selv, de andre reiselederne og et nummer hjemme, for eksempel skolen, klubben eller kontoret. Alle på turen ser dem, også uten nett."
-        : "Reiselederen har ikke lagt inn noen nummer ennå."}</p>
-      ${nyknapp}`;
-
-    return `
-      ${utenNett(S.kontakt)}
-      <p class="muted" style="margin:0">Trykk på et nummer for å ringe.</p>
-      <div class="gruppe"><div class="list">
+    const nyknapp = leder ? `<button class="btn" data-nykontakt="1">Legg til nummer</button>` : "";
+    return `<div>
+      <div class="eyebrow" style="margin-bottom:8px">Nødnummer</div>
+      ${liste.length ? `<div class="gruppe"><div class="list">
         ${liste.map(c => `<a class="listrow" href="tel:${esc(telnummer(c.telefon))}">
           <span class="rikon gul">${ICON.telefon}</span>
           <div class="grow"><div class="nm">${esc(c.navn)}</div>
             <div class="sub">${esc([c.rolle, c.telefon, c.notat].filter(Boolean).join(" · "))}</div></div>
-          ${leder ? "" : `<span class="chev">${ICON.chev}</span>`}
         </a>${leder ? `<div class="kontaktrad">
           <button class="linkbtn" data-endrekontakt="${esc(c.id)}">endre</button>
           <button class="linkbtn fare" data-slettkontakt="${esc(c.id)}">slett</button>
         </div>` : ""}`).join("")}
-      </div></div>
-      ${nyknapp}`;
+      </div></div>` : `<p class="muted" style="margin:0 0 10px">${leder
+        ? "Legg inn deg selv, de andre reiselederne og et nummer hjemme." : "Ingen nummer ennå."}</p>`}
+      ${nyknapp}
+    </div>`;
+  }
+
+  /* Deltakeren ser sin egen pårørende. Reiselederen ser alle, med
+     hvem som mangler. */
+  function paaroerendeDel(leder) {
+    if (!har("paaroerende") || !S.paarTlf) return "";
+    if (!leder) {
+      const m = S.paarTlf.mitt;
+      return `<div>
+        <div class="eyebrow" style="margin-bottom:8px">Din nærmeste pårørende</div>
+        <div class="gruppe"><div class="list"><button class="listrow" data-sheet="paaroerende">
+          <span class="rikon gul">${ICON.telefon}</span>
+          <div class="grow"><div class="nm">${m ? esc(m.navn) : "Legg inn"}</div>
+            ${m ? `<div class="sub">${esc(m.telefon)}</div>` : ""}</div>
+          <span class="chev">${ICON.chev}</span></button></div></div>
+      </div>`;
+    }
+    const { folk, kart } = S.paarTlf;
+    const deltakere = (folk || []).filter(p => !p.skjult && !p.venter && !p.me);
+    const med = deltakere.filter(p => kart.get(p.id));
+    const uten = deltakere.filter(p => !kart.get(p.id));
+    if (!deltakere.length) return `<div>
+      <div class="eyebrow" style="margin-bottom:8px">Pårørende</div>
+      <p class="muted" style="margin:0">Deltakerne legger inn sin egen når de blir med.</p></div>`;
+    return `<div>
+      <div class="eyebrow" style="margin-bottom:8px">Pårørende · ${med.length} av ${deltakere.length}</div>
+      ${med.length ? `<div class="gruppe"><div class="list">${med.map(p => {
+        const r = kart.get(p.id);
+        return `<a class="listrow" href="tel:${esc(telnummer(r.telefon))}">
+          <div class="grow"><div class="nm">${esc(r.navn)}</div>
+            <div class="sub">${esc(r.telefon)} · til ${esc(p.name)}</div></div></a>`;
+      }).join("")}</div></div>` : ""}
+      ${uten.length ? `<p class="muted" style="margin:10px 0 0;font-size:14px">Mangler: ${esc(uten.map(p => p.name).join(", "))}</p>` : ""}
+    </div>`;
   }
 
   /* En tel:-lenke tåler tall, pluss og noen skilletegn. Mellomrom og
@@ -4684,8 +4810,7 @@ const UI = (() => {
     const { runde, folk } = S.opprop;
 
     if (!runde) return `
-      <p class="muted" style="margin:0">Et opprop er en runde: du haker av hvert navn,
-        og lukker den når alle er med. Ingen andre enn reiselederne ser den.</p>
+      <p class="muted" style="margin:0">Hak av navnene. Bare reiselederne ser oppropet.</p>
       <button class="btn primary big" data-nyttopprop="1">Start et opprop</button>`;
 
     // Gjelder runden ett kjøretøy, telles de som sitter der. De som ikke
@@ -5101,6 +5226,85 @@ const UI = (() => {
     try { S.dok = await Api.dokumenter(S.trip.id); } catch { S.dok = []; S.dokFeil = true; }
     if (S.side === "dokumenter") render();
   }
+  /* ───────── tilgangskoder (bare for TripMate) ─────────
+     En kode gir én kunde rett til å lage turer: et antall turer (eller
+     ubegrenset), et tak på personer per tur, og eventuelt en sluttdato. */
+  async function aapneTilgang(fraHistorikk) {
+    S.side = "tilgang"; S.tilgangListe = null; S.tilgangFeil = false;
+    if (!fraHistorikk) history.pushState({ side: "tilgang" }, "");
+    render();
+    try { S.tilgangListe = await Api.tilgangListe(); } catch { S.tilgangListe = []; S.tilgangFeil = true; }
+    if (S.side === "tilgang") render();
+  }
+
+  function viewTilgang() {
+    if (S.tilgangFeil) return '<p class="muted">Klarte ikke hente kodene.</p>';
+    if (!S.tilgangListe) return venter("Henter kodene");
+    const dato = d => new Date(d + "T12:00").toLocaleDateString("nb-NO", { day: "numeric", month: "short", year: "numeric" });
+    const rad = x => {
+      const utlopt = x.gyldigTil && x.gyldigTil < today();
+      const status = !x.aktiv ? "Stengt" : utlopt ? "Utløpt" : x.brukt ? (x.bruktNavn || "I bruk") : "Ikke brukt ennå";
+      const turer = x.maksTurer === null ? `${x.turer} turer` : `${x.turer} av ${x.maksTurer} ${x.maksTurer === 1 ? "tur" : "turer"}`;
+      return `<div class="card pad tilgangkort${!x.aktiv || utlopt ? " av" : ""}">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline">
+          <b>${esc(x.kunde)}</b><span class="muted" style="font-size:13px">${esc(status)}</span></div>
+        <button class="kodeknapp" data-copy="${esc(x.kode)}">${esc(x.kode)}</button>
+        <div class="muted" style="font-size:13.5px">Opptil ${x.maksDeltakere} personer · ${esc(turer)}${x.gyldigTil ? ` · til ${esc(dato(x.gyldigTil))}` : ""}</div>
+        <button class="linkbtn${x.aktiv ? " fare" : ""}" style="margin-top:8px;font-size:13px" data-tilgangaktiv="${esc(x.id)}" data-paa="${x.aktiv ? "0" : "1"}">${x.aktiv ? "Steng koden" : "Åpne koden igjen"}</button>
+      </div>`;
+    };
+    return `
+      <button class="btn primary big" data-sheet="nytilgang">Ny tilgangskode</button>
+      ${S.tilgangListe.length ? `<div style="display:flex;flex-direction:column;gap:10px">${S.tilgangListe.map(rad).join("")}</div>`
+        : '<p class="muted" style="margin:0">Ingen koder ennå.</p>'}`;
+  }
+
+  function sheetNyTilgang() {
+    openSheet(`<h3>Ny tilgangskode</h3>
+      <form id="ntForm" novalidate>
+        <div class="field"><label for="ntKunde">Kunde</label>
+          <input id="ntKunde" maxlength="80" placeholder="Sandnes IL" autocomplete="off"></div>
+        <fieldset class="spm"><legend>Hvor mange turer?</legend>
+          <div class="picks to">
+            <label class="pick"><input type="radio" name="ntTurer" value="1" checked><span><b>Én tur</b></span></label>
+            <label class="pick"><input type="radio" name="ntTurer" value="fritt"><span><b>Ubegrenset</b></span></label>
+            <label class="pick"><input type="radio" name="ntTurer" value="antall"><span><b>Et antall</b></span></label>
+          </div>
+        </fieldset>
+        <div class="field" id="ntAntallFelt" hidden><label for="ntAntall">Antall turer</label>
+          <input id="ntAntall" type="number" min="1" max="1000" value="5"></div>
+        <div class="field"><label for="ntPers">Maks personer per tur</label>
+          <input id="ntPers" type="number" min="2" max="2000" value="50"></div>
+        <div class="field"><label for="ntTil">Gjelder til (valgfritt)</label>
+          <input id="ntTil" type="date"></div>
+        <p class="err" id="ntErr" hidden></p>
+        <button class="btn primary big" type="submit" id="ntLag">Lag koden</button>
+      </form>
+      <button class="btn close" data-close>Avbryt</button>`);
+    document.querySelectorAll('input[name="ntTurer"]').forEach(r => r.addEventListener("change", () => {
+      $("ntAntallFelt").hidden = document.querySelector('input[name="ntTurer"]:checked').value !== "antall";
+    }));
+    $("ntForm").addEventListener("submit", async e => {
+      e.preventDefault();
+      const err = $("ntErr"), btn = $("ntLag");
+      const vis = t => { err.textContent = t; err.hidden = false; };
+      const kunde = $("ntKunde").value.trim();
+      const valg = document.querySelector('input[name="ntTurer"]:checked').value;
+      const maksTurer = valg === "fritt" ? null : valg === "1" ? 1 : parseInt($("ntAntall").value, 10);
+      const maksDeltakere = parseInt($("ntPers").value, 10);
+      if (!kunde) return vis("Skriv hvem koden er til.");
+      if (maksTurer !== null && !(maksTurer >= 1 && maksTurer <= 1000)) return vis("Antall turer må være mellom 1 og 1000.");
+      if (!(maksDeltakere >= 2 && maksDeltakere <= 2000)) return vis("Personer per tur må være mellom 2 og 2000.");
+      btn.disabled = true; btn.innerHTML = prikker() + " Lager koden";
+      try {
+        const rad = await Api.lagTilgang({ kunde, maksTurer, maksDeltakere, gyldigTil: $("ntTil").value || null });
+        closeSheet();
+        await aapneTilgang(true);
+        melding(`Koden til ${kunde} er\n\n${rad.kode}\n\nTrykk på koden i lista for å kopiere den.`);
+      } catch (e2) { btn.disabled = false; btn.textContent = "Lag koden"; vis(e2.message); }
+    });
+  }
+
   const storrelse = b => b > 1048576 ? (b / 1048576).toFixed(1).replace(".", ",") + " MB" : Math.max(1, Math.round(b / 1024)) + " kB";
   function viewDokumenter() {
     if (S.dokFeil) return '<p class="muted">Klarte ikke hente dokumentene. Sjekk nettet og prøv igjen.</p>';
@@ -5118,16 +5322,16 @@ const UI = (() => {
       <div>
         <div class="eyebrow" style="margin-bottom:8px">Fra reiselederen</div>
         ${felles.length ? `<div class="memberlist">${felles.map(rad).join("")}</div>`
-          : `<p class="muted" style="margin:0">${leder ? "Legg inn heftet, forsikringen eller annet alle trenger." : "Reiselederen har ikke lagt inn noe ennå."}</p>`}
+          : `<p class="muted" style="margin:0">${leder ? "Heftet, forsikringen eller annet alle trenger." : "Ingen dokumenter ennå."}</p>`}
         ${leder ? opp(true, "Last opp for alle") : ""}
       </div>
       <div>
         <div class="eyebrow" style="margin-bottom:8px">Mine dokumenter</div>
-        <p class="muted" style="margin:0 0 8px">Bare du ser disse, ikke reiselederne heller. For eksempel billetten din.</p>
+        <p class="muted" style="margin:0 0 8px">Bare du ser disse.</p>
         ${mine.length ? `<div class="memberlist">${mine.map(rad).join("")}</div>` : ""}
         ${opp(false, "Last opp mitt eget")}
       </div>
-      <p class="muted">PDF eller bilde, maks 10 MB. Dokumentene slettes sammen med turen.</p>`;
+      <p class="muted" style="font-size:13.5px">PDF eller bilde, maks 10 MB.</p>`;
   }
 
   /* L9: programmet som kalenderfil. Hvert punkt med klokkeslett blir en
@@ -5282,7 +5486,7 @@ const UI = (() => {
         h: "Rom virker på samme måte",
         t: "Legg inn rommene, eller lim inn romlista fra Excel. To brytere styrer om deltakerne kan flytte seg." },
       { tab: "turen", maal: '[data-side="kontakt"]',
-        h: "Nødnummer ligger alltid tilgjengelig",
+        h: "Telefonnumre ligger her",
         t: "Deg, de andre reiselederne og et nummer hjemme. Ett trykk for å ringe, og det virker uten nett." },
       { tab: "turen", maal: '[data-side="opprop"]',
         h: "Opprop på rasteplassen",
@@ -5308,7 +5512,7 @@ const UI = (() => {
         h: "Plassen din i bussen",
         t: "Velg plass, eller se hvilken du har fått. Vil du sitte et annet sted, spør du den som sitter der." },
       { tab: "turen", maal: '[data-side="kontakt"]',
-        h: "Nummeret du ringer hvis noe skjer",
+        h: "Telefonnumre ligger her",
         t: "Reiselederne og et nummer hjemme, ett trykk unna. Lista virker uten nett." },
       { tab: "meg", maal: '[data-sheet="varsler"]',
         h: "Slå på varsler her",
@@ -5586,23 +5790,10 @@ const UI = (() => {
     const leder = S.trip.role === "leader";
     const folk = S.folk;
 
+    const antallMed = (folk || []).filter(p => !p.skjult).length;
     const topp = `
-      <p class="muted" style="margin:0">
-        ${leder
-          ? "Reiseledere kan endre programmet og lese inn PDF-er. Du kan gi rollen videre."
-          : "Reiseledere kan endre programmet."}</p>
-      ${leder ? `<label class="pick" style="margin-top:14px">
-        <input type="checkbox" id="bilderPaa" ${S.trip.bilder ? "checked" : ""}>
-        <span><b>Tillat bilder i chattene</b><br>
-          <small>Bildene slettes automatisk 30 dager etter siste programdag.</small></span>
-      </label>
-      <label class="pick" style="margin-top:10px">
-        <input type="checkbox" id="paaroerendePaa" ${S.trip.paaroerende ? "checked" : ""}>
-        <span><b>Be om nærmeste pårørende</b><br>
-          <small>Hver deltaker oppgir navn og telefon, og krysser av for at det er greit.
-            Bare reiselederne ser det. Skrur du av, slettes alt som er samlet inn.</small></span>
-      </label>
-      <label class="pick" style="margin-top:10px">
+      ${leder && S.trip.maksDeltakere && folk ? `<p class="muted" style="margin:0">${antallMed} av ${S.trip.maksDeltakere} plasser er tatt.</p>` : ""}
+      ${leder ? `<label class="pick" style="margin-top:4px">
         <input type="checkbox" id="krevGodkjenning" ${S.trip.krevGodkjenning ? "checked" : ""}>
         <span><b>Krev godkjenning for å bli med</b><br>
           <small>Nye deltakere må slippes inn av en reiseleder. Turkoden alene holder ikke.</small></span>
@@ -5646,8 +5837,7 @@ const UI = (() => {
               <button class="linkbtn" style="color:var(--danger)" data-fjern="${esc(p.id)}" data-navn="${esc(p.name)}">fjern</button>
             </span>` : ""}
           </div>`).join("")}</div>
-        ${leder ? `<p class="muted" style="margin-top:10px">Den som laget turen beholder lederrollen,
-          og turen må alltid ha minst én.</p>` : ""}
+
       </div>`;
   }
   /* ───────────────── innlogging med e-post ─────────────────
@@ -6055,8 +6245,7 @@ const UI = (() => {
           <span>Standard for alle chatter</span>
           <button class="infoknapp" data-sheet="varselinfo" aria-label="Hva betyr valgene?">i</button>
         </div>
-        <p class="muted" style="margin:0 0 9px">Gjelder hver chat i turen som ikke har
-          sitt eget valg lenger nede.</p>
+
         ${nivaliste("turniva", turNiva, "")}
       </div>
 
@@ -6083,8 +6272,7 @@ const UI = (() => {
             </div>`).join("")}
           </div>
         </div>
-        <p class="muted" style="margin-top:7px">Dette er gruppechattene i turen. En chat som
-          følger turen, endrer seg med valget over.</p>
+
       </div>
 
       ${nativ || !altVirker ? "" : `<div style="margin-top:18px">
@@ -6405,7 +6593,7 @@ const UI = (() => {
   });
 
   document.addEventListener("click", async e => {
-    const t = e.target.closest("[data-tab],[data-side],[data-pakk],[data-slettpakk],[data-sete],[data-setevalg],[data-nykj],[data-endrekj],[data-slettkj],[data-vaerigjen],[data-svarbytte],[data-avgjorbytte],[data-trekkbytte],[data-nyttrom],[data-endrerom],[data-slettrom],[data-fyllrom],[data-fyllalle],[data-settrom],[data-romvalg],[data-utavrom],[data-bytterom],[data-svarrombytte],[data-avgjorrombytte],[data-trekkrombytte],[data-nykontakt],[data-endrekontakt],[data-slettkontakt],[data-nyttopprop],[data-hake],[data-lukkopprop],[data-omvis],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-iprog],[data-taned],[data-romliste],[data-angrerom],[data-fjernres],[data-rettnavn],[data-utsett],[data-startopprop],[data-seteliste],[data-fyllseter],[data-kalender],[data-aapnedok],[data-slettdok],[data-soktreff],[data-delitem],[data-delday],[data-delmsg],[data-rapporter],[data-blokker],[data-opphevblokk],[data-rappslett],[data-rappfjern],[data-rappferdig],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-msgmeny],[data-chat],[data-paa],[data-slettchat],[data-bilde],[data-slettbilde],[data-bvlukk],[data-bvmeny],[data-lagrebilde],[data-kopimeld],[data-deltekst],[data-chatside],[data-cmadd],[data-cmdel],[data-cmleave],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn,#skjulInstall,#installKnapp");
+    const t = e.target.closest("[data-tab],[data-side],[data-pakk],[data-slettpakk],[data-sete],[data-setevalg],[data-nykj],[data-endrekj],[data-slettkj],[data-vaerigjen],[data-svarbytte],[data-avgjorbytte],[data-trekkbytte],[data-nyttrom],[data-endrerom],[data-slettrom],[data-fyllrom],[data-fyllalle],[data-settrom],[data-romvalg],[data-utavrom],[data-bytterom],[data-svarrombytte],[data-avgjorrombytte],[data-trekkrombytte],[data-nykontakt],[data-endrekontakt],[data-slettkontakt],[data-nyttopprop],[data-hake],[data-lukkopprop],[data-omvis],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-iprog],[data-taned],[data-romliste],[data-angrerom],[data-fjernres],[data-rettnavn],[data-utsett],[data-startopprop],[data-seteliste],[data-fyllseter],[data-kalender],[data-aapnedok],[data-slettdok],[data-soktreff],[data-delitem],[data-delday],[data-delmsg],[data-rapporter],[data-blokker],[data-opphevblokk],[data-rappslett],[data-rappfjern],[data-rappferdig],[data-tilgangaktiv],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-msgmeny],[data-chat],[data-paa],[data-slettchat],[data-bilde],[data-slettbilde],[data-bvlukk],[data-bvmeny],[data-lagrebilde],[data-kopimeld],[data-deltekst],[data-chatside],[data-cmadd],[data-cmdel],[data-cmleave],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn,#skjulInstall,#installKnapp");
     if (!t) return;
 
     if (t.id === "joinTilbake") { S.fraStart = false; return visAuth("start"); }
@@ -6434,6 +6622,16 @@ const UI = (() => {
 
     if (t.id === "resetBtn") {
       const gjest = Api.erAnonym();
+      // En gjest som eier en tur, kan ikke logge ut: kontoen slettes da,
+      // og turen ville stått igjen uten noen som kan styre den.
+      if (gjest) {
+        const eier = await Api.antallEgneTurer().catch(() => 0);
+        if (eier) {
+          if (await bekreft(`Du er gjest og eier ${eier === 1 ? "en tur" : eier + " turer"}. Logger du ut, mister du turen for godt.\n\nKoble kontoen til e-posten din først, så kan du logge inn igjen senere.`,
+            { ja: "Koble til e-post", nei: "Avbryt", fare: false })) { closeSheet(); visAuth("koble"); }
+          return;
+        }
+      }
       const sporsmaal = gjest
         ? "Logge ut? Du er gjest, så kontoen finnes bare her — den slettes, og du kommer inn igjen med turkoden."
         : "Logge ut på denne enheten? Turene ligger igjen i basen, og du logger inn igjen med e-posten din.";
@@ -6491,6 +6689,7 @@ const UI = (() => {
       if (t.dataset.side === "kontakt") return aapneKontakt();
       if (t.dataset.side === "opprop") return aapneOpprop();
       if (t.dataset.side === "dokumenter") return aapneDokumenter();
+      if (t.dataset.side === "tilgang") return aapneTilgang();
       return aapneSeter();
     }
 
@@ -6960,6 +7159,13 @@ const UI = (() => {
     if (t.dataset.emoji) { closeSheet(); return reager(t.dataset.pa, t.dataset.emoji); }
     if (t.dataset.msgmeny) return sheetEmoji(t.dataset.msgmeny);
     if (t.dataset.rapporter) return sheetRapporter(t.dataset.rapporter);
+    if (t.dataset.tilgangaktiv) {
+      const paa = t.dataset.paa === "1";
+      if (!paa && !await bekreft("Stenge koden? Kunden kan ikke lage flere turer med den. Turer som finnes, virker som før.", { ja: "Steng" })) return;
+      try { await Api.settTilgangAktiv(t.dataset.tilgangaktiv, paa); await aapneTilgang(true); }
+      catch (err) { toast(err.message || "Klarte ikke."); }
+      return;
+    }
     if (t.dataset.blokker) return blokkerPerson(t.dataset.blokker, t.dataset.navn || "personen");
     if (t.dataset.opphevblokk) {
       try { await Api.opphevBlokk(t.dataset.opphevblokk); sheetBlokkerte(); render(); }
@@ -7018,6 +7224,8 @@ const UI = (() => {
     if (t.dataset.sheet === "koblepost") { closeSheet(); return visAuth("koble"); }
     if (t.dataset.sheet === "nyttpakk") return sheetNyttPakk(t.dataset.egen === "1");
     if (t.dataset.sheet === "skjulte") return sheetSkjulte();
+    if (t.dataset.sheet === "funksjoner") return sheetFunksjoner();
+    if (t.dataset.sheet === "nytilgang") return sheetNyTilgang();
     if (t.dataset.sheet === "rapporter") return sheetRapportliste();
     if (t.dataset.sheet === "blokkerte") return sheetBlokkerte();
     if (t.dataset.sheet === "about") return sheetAbout();

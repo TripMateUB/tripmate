@@ -177,6 +177,13 @@ const Api = (() => {
     // «kjent» betyr at teksten er skrevet for å leses av folk, ikke av oss.
     const k = t => Object.assign(new Error(t), { kjent: true });
     if (m.includes("ukjent_kode")) return k("Fant ingen tur med den koden.");
+    if (m.includes("mangler_tilgang")) return k("Du trenger en tilgangskode fra TripMate for å lage en tur.");
+    if (m.includes("ukjent_tilgang")) return k("Fant ingen tilgangskode med den koden. Sjekk at den er skrevet riktig.");
+    if (m.includes("tilgang_utlopt")) return k("Tilgangskoden har gått ut. Kontakt TripMate.");
+    if (m.includes("tilgang_brukt")) return k("Tilgangskoden er allerede brukt av en annen konto.");
+    if (m.includes("ikke_superadmin")) return k("Bare TripMate kan lage tilgangskoder.");
+    if (m.includes("tur_full")) return k("Turen er full. Spør reiselederen.");
+    if (m.includes("ikke_lov")) return k("Det kan bare TripMate endre.");
     if (m.includes("mangler_navn")) return k("Navn mangler.");
     if (m.includes("for_mange_turer")) return k("Du har laget for mange turer.");
     if (m.includes("ikke_medlem")) return k("Du er ikke med på denne turen.");
@@ -360,6 +367,11 @@ const Api = (() => {
       // Utvidelse 30
       seterFritt: trip.seter_fritt !== false,
       paaroerende: trip.paaroerende === true,
+      // Utvidelse 34: hvilke deler turen har, og taket på antall personer.
+      // Mangler kolonnen (basen er ikke oppdatert), er alt på som før.
+      funksjoner: Object.assign({ pakk: true, seter: true, rom: true, dokumenter: true, opprop: true, kontakt: true },
+        trip.funksjoner || {}),
+      maksDeltakere: trip.maks_deltakere || null,
       slettes: slettesDato(trip, days),
       romGodkjenn: trip.rom_godkjenn !== false,
       venter: member ? member.status === "pending" : false,
@@ -1193,6 +1205,56 @@ const Api = (() => {
     if (i < 0) return;
     if (liste[i].bilde) liste[i].txt = "";
     else liste.splice(i, 1);
+  }
+
+  /* Hvilke deler turen har (utvidelse-34). Lagres samlet, så det ene
+     valget aldri kan overskrive det andre halvveis. */
+  async function settFunksjoner(tripId, funksjoner) {
+    const { error } = await sb.from("trips").update({ funksjoner }).eq("id", tripId);
+    if (error) throw friendly(error);
+    if (cache.trip && cache.trip.id === tripId) cache.trip.funksjoner = Object.assign({}, cache.trip.funksjoner, funksjoner);
+  }
+
+  /* ───────── tilgang til å lage turer (utvidelse-34) ───────── */
+  async function minTilgang() {
+    const { data, error } = await sb.rpc("min_tilgang");
+    // Er funksjonen ikke lagt inn ennå, kan alle lage turer som før.
+    if (error) return { superadmin: false, gammel: true, koder: [] };
+    const rader = data || [];
+    const sup = rader.some(r => r.superadmin);
+    const koder = rader.filter(r => !r.superadmin).map(r => ({
+      kunde: r.kunde, turerIgjen: r.turer_igjen, maksDeltakere: r.maks_deltakere, gyldigTil: r.gyldig_til
+    }));
+    return { superadmin: sup, koder, kanLage: sup || koder.some(k => k.turerIgjen === null || k.turerIgjen > 0) };
+  }
+  async function losInnTilgang(kode) {
+    const { error } = await sb.rpc("los_inn_tilgang", { p_kode: kode });
+    if (error) throw friendly(error);
+  }
+  async function lagTilgang({ kunde, maksTurer, maksDeltakere, gyldigTil }) {
+    const { data, error } = await sb.rpc("lag_tilgang", {
+      p_kunde: kunde, p_maks_turer: maksTurer, p_maks_deltakere: maksDeltakere, p_gyldig_til: gyldigTil || null
+    });
+    if (error) throw friendly(error);
+    return Array.isArray(data) ? data[0] : data;
+  }
+  async function tilgangListe() {
+    const { data, error } = await sb.rpc("tilgang_liste");
+    if (error) throw friendly(error);
+    return (data || []).map(r => ({
+      id: r.id, kode: r.kode, kunde: r.kunde, maksTurer: r.maks_turer, maksDeltakere: r.maks_deltakere,
+      gyldigTil: r.gyldig_til, aktiv: r.aktiv, brukt: r.brukt, bruktNavn: r.brukt_navn, turer: r.turer
+    }));
+  }
+  async function settTilgangAktiv(id, aktiv) {
+    const { error } = await sb.rpc("sett_tilgang_aktiv", { p_id: id, p_aktiv: aktiv });
+    if (error) throw friendly(error);
+  }
+  /* Turer du eier. En gjest som eier en tur, må sikre kontoen før den
+     logger ut, ellers står turen igjen uten noen som kan styre den. */
+  async function antallEgneTurer() {
+    const { count } = await sb.from("trips").select("id", { count: "exact", head: true }).eq("created_by", userId);
+    return count || 0;
   }
 
   async function setBilderPaa(tripId, paa) {
@@ -2616,6 +2678,7 @@ const Api = (() => {
 
   return {
     samtidigNokkel, samtidigGrupper,
+    settFunksjoner, minTilgang, losInnTilgang, lagTilgang, tilgangListe, settTilgangAktiv, antallEgneTurer,
     lastBlokkerte, blokkertListe, blokker, opphevBlokk, rapporter, rapportListe, behandleRapport, slettMeldingMedId,
     fyllSeter, dokumenter, lastOppDokument, dokumentAdresse, slettDokument, sokMeldinger,
     endreNavn, rettNavn, setSeterFritt, settPaaroerende, minPaaroerende, lagrePaaroerende, slettPaaroerende,
