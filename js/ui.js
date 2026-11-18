@@ -1027,7 +1027,7 @@ const UI = (() => {
         <p class="muted" style="margin:10px 0 16px;color:var(--ink-2)">
           ${leader ? "Legg inn dagene i turen, så bygger appen resten." : "Reiselederen har ikke lagt inn programmet ennå."}</p>
         ${leader ? `<div class="stack"><button class="btn primary" data-sheet="addday">Legg til første dag</button>
-          <button class="btn" data-sheet="importpdf">Les inn program fra PDF</button></div>` : ""}
+          ${pdfInnlesing() ? `<button class="btn" data-sheet="importpdf">Les inn program fra PDF</button>` : ""}</div>` : ""}
       </div>
       ${leader ? `<p class="muted">Del turkoden <b class="mono">${esc(trip.code)}</b> med deltakerne så de kan bli med.</p>` : ""}`;
     }
@@ -2027,7 +2027,7 @@ const UI = (() => {
               ? `${S.ventende} venter` : ""}</span>
             <span class="chev">${ICON.chev}</span></button>
 
-          ${leder ? `<button class="listrow" data-sheet="importpdf">
+          ${leder && pdfInnlesing() ? `<button class="listrow" data-sheet="importpdf">
             <span class="rikon">${ICON.last}</span>
             <div class="grow"><div class="nm">Les inn program fra PDF</div></div>
             <span class="chev">${ICON.chev}</span></button>` : ""}
@@ -3476,9 +3476,9 @@ const UI = (() => {
                     <div class="field"><label for="tLast">Ditt etternavn</label><input id="tLast" maxlength="40" autocapitalize="words" autocorrect="off" spellcheck="false" autocomplete="family-name"></div>`}
         <div class="field"><label for="tName">Navn på turen</label><input id="tName" maxlength="80" placeholder="Barcelona 2027"></div>
         <div class="field"><label for="tOrg">Gruppe</label><input id="tOrg" maxlength="120" placeholder="Sandnes IL G16, salgsavdelingen eller 10B"></div>
-        ${sporsmaal("tProgram", "Hvordan vil du lage programmet?", "", [
+        ${pdfInnlesing() ? sporsmaal("tProgram", "Hvordan vil du lage programmet?", "", [
           ["pdf", "Les inn fra PDF", "Appen leser PDF-en og viser et forslag."],
-          ["selv", "Jeg legger det inn selv", ""]])}
+          ["selv", "Jeg legger det inn selv", ""]]) : ""}
         <fieldset class="spm"><legend>Hva skal turen ha?</legend>
           <small>Program og chat har alle turer. Resten kan endres senere under Turen.</small>
           <div class="gruppe" style="margin-top:10px"><div class="list">${funksjonsrader(() => false, "nf_")}</div></div>
@@ -3514,7 +3514,7 @@ const UI = (() => {
       const name = $("tName").value.trim();
       if (!name) return vis("Turen trenger et navn.");
       const trengerFordeling = valgt("seter") || valgt("rom");
-      const mangler = [["tProgram", "hvordan programmet skal lages"],
+      const mangler = [pdfInnlesing() && ["tProgram", "hvordan programmet skal lages"],
         trengerFordeling && ["tFordel", "hvem som velger seter og rom"],
         ["tGodkjenn", "om du slipper inn deltakerne selv"]]
         .filter(Boolean).filter(([n]) => !svar(n)).map(([, t]) => t);
@@ -3542,7 +3542,7 @@ const UI = (() => {
         S.tab = "program";
         await openTrip(trip.id);
         toast("Turen er laget. Kode: " + trip.code);
-        if (svar("tProgram") === "pdf") sheetImportPdf();
+        if (pdfInnlesing() && svar("tProgram") === "pdf") sheetImportPdf();
       } catch (e2) {
         btn.disabled = false; btn.textContent = "Lag turen";
         if (e2 && /tilgangskode/.test(e2.message || "")) return sheetTilgangskode({ koder: [] });
@@ -3933,7 +3933,10 @@ const UI = (() => {
     });
   }
 
-  /* ───────────────── les program fra PDF ───────────────── */
+  /* ───────────────── les program fra PDF ─────────────────
+     Slått av 18. november 2026: PDF-en ble sendt til en KI-tjeneste
+     utenfor EU. Sett til true for å få funksjonen tilbake. */
+  function pdfInnlesing() { return false; }
   let forslag = null;   // siste forslag fra serveren, venter på godkjenning
 
   function sheetImportPdf() {
@@ -5835,7 +5838,7 @@ const UI = (() => {
         t: "Trykk på en dag, så bytter programmet under." },
       { vis: '[data-sheet="additem"]', tab: "program",
         h: "Slik legger du inn et punkt",
-        t: "Tid, tittel og sted. Har du heftet som PDF, leses hele programmet inn på en gang." },
+        t: "Tid, tittel og sted." + (pdfInnlesing() ? " Har du heftet som PDF, leses hele programmet inn på en gang." : "") },
       { trykk: FANE("chat"), ferdig: () => S.tab === "chat" && !S.openChat,
         h: "Trykk på Chat",
         t: "Fanene nederst tar deg mellom de fire delene av appen." },
@@ -7713,7 +7716,7 @@ const UI = (() => {
     if (t.dataset.sheet === "rapporter") return sheetRapportliste();
     if (t.dataset.sheet === "blokkerte") return sheetBlokkerte();
     if (t.dataset.sheet === "about") return sheetAbout();
-    if (t.dataset.sheet === "importpdf") return sheetImportPdf();
+    if (t.dataset.sheet === "importpdf") return pdfInnlesing() ? sheetImportPdf() : null;
 
     if (t.dataset.day) { S.day = t.dataset.day; return render(); }
   });
